@@ -1,0 +1,5 @@
+site_name: Another Typesetter 另一個排版器
+site_url: https://blog.kianting.info/pages/typesetter
+nav:
+  - Home: index.md
+theme: readthedocs
