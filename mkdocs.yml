@@ -1,5 +1,11 @@
 site_name: Another Typesetter 另一個排版器
-site_url: https://blog.kianting.info/pages/typesetter
+site_url: https://blog.kianting.info/pages/docs/anotherTypeSetter/
 nav:
   - Home: index.md
+  - Ch 1: defineASTandGrammar.md
+  - Ch 2: 2DManipulating.md
 theme: readthedocs
+
+markdown_extensions:
+  - attr_list
+  - md_in_html

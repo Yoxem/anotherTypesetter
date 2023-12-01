@@ -1,0 +1,13 @@
+/home/yoxem/桌面/TMP/anotherTypesetter/src/ch1/target/debug/deps/pom-718a563f4cdb73c4.rmeta: /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/lib.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/range.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/result.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/set.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/parser.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/char_class.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/utf8.rs
+
+/home/yoxem/桌面/TMP/anotherTypesetter/src/ch1/target/debug/deps/libpom-718a563f4cdb73c4.rlib: /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/lib.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/range.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/result.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/set.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/parser.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/char_class.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/utf8.rs
+
+/home/yoxem/桌面/TMP/anotherTypesetter/src/ch1/target/debug/deps/pom-718a563f4cdb73c4.d: /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/lib.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/range.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/result.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/set.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/parser.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/char_class.rs /home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/utf8.rs
+
+/home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/lib.rs:
+/home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/range.rs:
+/home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/result.rs:
+/home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/set.rs:
+/home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/parser.rs:
+/home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/char_class.rs:
+/home/yoxem/.cargo/registry/src/index.crates.io-6f17d22bba15001f/pom-3.3.0/src/utf8.rs:
