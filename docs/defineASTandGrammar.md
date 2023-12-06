@@ -135,10 +135,10 @@ let sWrapped = {type : "OK", rest : s, matched : ""};
 // match0~9 3 times
 thenDo(thenDo(thenDo(sWrapped, match0to9), match0to9), match0to9)
 ```
-我們可以製作一個小的tokenizer。但是因為自己寫parser combinator太累了，所以我們就用nom來幫我們代勞。
+我們可以製作一個小的tokenizer。但是因為自己寫parser combinator太累了，所以我們就用`ts-parsec`來幫我們代勞。
 
 
-安裝nom可以用：`cargo run nom`。
+安裝`ts-parsec`可以用：`npm install -g typescript-parsec`。底下的程式使用的函數的詳細說明可以參考[官方文件](https://github.com/microsoft/ts-parsec/blob/master/doc/ParserCombinators.md)。
 
 假設我們要match 0-9任意次以上（就是integer），我們可以這樣寫：
 
