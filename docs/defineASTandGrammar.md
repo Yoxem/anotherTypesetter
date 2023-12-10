@@ -61,25 +61,36 @@ C語言、Python語言就算有許多的關鍵字、操作符、符號或是常�
 所以我們可以定義以下的BNF風文法：
 
 ```
-Language ::= PrintTxt | Exprs
+Language ::= MainTxt | Exprs | Comment
 
-PrintTxt ::= (('\' '@')| 非@字元)+ //「我是一隻貓」或是「www\@example.com」
+Comment ::= '/*' (不含'*/'的任何字元組合)* '*/'
 
+
+MainTxt ::= (('\' '@')| 非@非空白字元)+ //顯示的文字。「我是一隻貓」或是「www\@example.com」
+
+// Exprs 表示一群定義變數、常數、函數、函數套用的表達式
 Exprs ::= @ Expr* @ // *表示前面的重複0次以上（包含不出現）
 
-Expr ::= (Letting | Setting | Lambda | Apply | Var| Const) | "(" Expr ")"
+// Comment also included
+// "(" and ")" only for applying function
+Expr ::= (Letting | Setting | Lambda |  | Var| Const) | "(" Applying ")" | Comment
 
 Letting ::= "let" Var "=" Expr "in" Expr // let foo = 12 in ...
 
 Setting ::= Var ":=" Expr "in"  Expr // foo := a in ...
 
-Lambda ::= "fn" Var "->" Expr // fn x -> 12
+// we force every function have at least 1 argument.
+Lambda ::= "fn" LambdaArgs "->" Expr // fn x y -> 12
 
-Apply ::= Expr Expr // foo 3 即foo(3)
+LambdaArgs ::= Var | Var LambdaArgs
+
+Applying ::= Expr ExprArgs   // foo 3 9 即foo(3, 9)
+
+ExprArgs ::= Expr | (Expr ExprArgs)
 
 Var ::= ID
 
-Const ::= String | Float | Int
+Const ::= String | Float | Integer
 
 ID ::=  ("_" | [a-z] |  [A-Z])  ("_" | [0-9] | [a-z] |  [A-Z])+
 
@@ -90,7 +101,14 @@ Float ::= [0-9]+ "." [0-9]+
 String ::= '"' (不是「"」的任一字元|('\' '"'))   '"'
 ```
 
-## 用ParserCombinator進行tokenize
+而上述的item可以被1個以上半形空白或tab（`\t`）以及1個「`\n`或`\r\n`」（換行符號）隔開。而為求簡化這些符號在MainTxt均指代一個半形空白。也就是空一個半形空白、兩個半形空白、一個tab、一個換行符號等等都會顯示如一個半形符號。而在Expr表達式區，把它忽略掉。另外兩個換行符號設定為換行指令，而這在Expr區會被忽略。所以要加另外兩條：
+
+```
+Space = (' ' | '\t')* | '\n' | '\r\n'
+NewPara = = ('\n' |'\r' '\n' ) ('\n' |'\r' '\n' )
+```
+
+## 用ts-parsec和regexp進行tokenize
 Parser combinator（分析器組合子）是一種利用高階函數來簡化分析器撰寫的辦法。這講到頭來會涉及「遞歸下降分析」以及其他編譯理論的東西，但太難了（聽說可以讀編譯理論的「龍書我們可以製作一個小的tokenizer。但是因為自己寫parser combinator太累了，所以我們就用nom來幫我們代勞。
 」）。講一個簡單的案例吧：
 
@@ -109,7 +127,7 @@ else{
 }
 ```
 
-假設我們要將字串`s`的前3個字的match 0~9呢？如果會高階函數的話，引入一個`then`函數，然後把`match0to9`傳進去，這樣寫起來比較簡潔，行數可以比較少：
+假設我們要將字串`s`的前3個字的match 0~9呢？如果會高階函數的話，引入一個`then`函數，然後把`match0to9`傳進去，這樣寫起來比較不會太糾結，比較好維護：
 
 ```
 function thenDo(input, fun){
@@ -140,94 +158,141 @@ thenDo(thenDo(thenDo(sWrapped, match0to9), match0to9), match0to9)
 
 安裝`ts-parsec`可以用：`npm install -g typescript-parsec`。底下的程式使用的函數的詳細說明可以參考[官方文件](https://github.com/microsoft/ts-parsec/blob/master/doc/ParserCombinators.md)。
 
-假設我們要match 0-9任意次以上（就是integer），我們可以這樣寫：
+因為這個軟體在 tokenize 的時候使用regex，所以我們就用這個東西來處理。
 
-```
+我們編輯Node.js的進入點程式（假設為src/index.js`），底下為定義tokenizer的型別和regex pattern：
 
-// import all the parser unit for string
-use nom::character::complete::*;
-// for the return type
-use nom::IResult;
-
-// integer ::= [0-9]+
-pub fn integer(input: &str) -> IResult<&str, &str> {
-    return digit1(input) ; // [0-9]+
-}
-
-// test parser
-#[cfg(test)]
-mod tests {
-    // import the functions ouside mod tests
-    use super::*;
-
-    // test integer
-    #[test]
-    fn test_integer() {
-    //if no error is shown, the function passes the test
-    assert_eq!(integer("12345"), Ok(("", "12345")));
-    assert_eq!(integer("0"), Ok(("", "0")));
-    }
+```typescript
+/** the type of token  */
+enum TokenKind {
+    Int, // 3
+    Flo, // 3.1416
+    Id, // foo, _123, etc
+    At, // @
+    Comt, // comment /*
+    Str, /** "foo" */
+    Assign, /** = */
+    Set, /** := */
+    Keyword, /** let, in */
+    LParen, /** ( */
+    RParen, /** ) */
+    Space, /** semi-width space tab, \r\n? */
+    NewPara, /** breaking paragraph, (\r\n?){2} */
+    MainTxt, /** used in main text */
 }
 
 
+// tokenizer
+const tokenizer = parsec.buildLexer([
+    [true, /^\d+/g, TokenKind.Int],
+    [true, /^\d+\.\d+/g, TokenKind.Flo],
+    [true, /^(let|in)/g, TokenKind.Keyword], // let and in
+    [true, /^[_a-zA-Z][_0-9a-zA-Z]*/g, TokenKind.Id],
+    [true, /^\@/g, TokenKind.At],
+    /* inside comment, only accept 1. non / character
+    or  2. "/ + non * character" */
+    [true, /^\/\*(\/[^*]|[^\\]?)*\*\//g, TokenKind.Comt],
+    [true, /^\"(\\\"|[^\"]?)*\"/g, TokenKind.Str],
+    [true, /^\:\=/g, TokenKind.Set],
+    [true, /^\=/g, TokenKind.Assign],
+    [true, /^\(/g, TokenKind.LParen],
+    [true, /^\)/g, TokenKind.RParen],
+    [true, /^([ \t]+|\n)/g, TokenKind.Space],
+    [true, /^(\r?\n){2}/g, TokenKind.NewPara],
+    [true, /^(\\\@|[^@\s])+/g, TokenKind.MainTxt],
+]);
 ```
 
-用`cargo run`可以順利通過：
+### 常數parsing
 
+增加儲存實際變數值的`ASTNode`型別
+
+```typescript
+// add "actualValue" in the parsed Token
+export interface ASTNode extends parsec.Token<TokenKind>{
+    // number is for float number;
+    //it's optional. since keyword has no value
+    actualValue? : bigint | number | string;
+}
 ```
-running 1 test
-test tests::test_integer ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-```
-
-我們做第二個tokenizer，`float`：
-
-其中的`recognize`蒐集所有包在裡面的`parsers`的string。
-```
-// collect matched strings of all the parsers,
-use nom::combinator::recognize;
-// given 2 parser and gets the result as (1st_matched, 2nd_matched),
-use nom::sequence::pair;
-// exact matching characters
-use nom::bytes::complete::tag;
-
-// float ::= [0-9]+ "." [0-9]+
-pub fn float(input: &str) -> IResult<&str, &str>{
-    // [0-9]+ "." [0-9]+
-    // "12.345" returns Ok((else, (("12", '.'), "345"))), then recgonize them as
-    // Ok("12.345")
-    let a = 
-        recognize(pair(pair(digit1, tag(".")), digit1))(input);
-    return a;
-
+增加處理常數的parser。`...value`有擴充object的意思。
+```typescript
+function applyInteger(value: parsec.Token<TokenKind.Int>): ASTNode {
+    // extend value to ASTNode
+    const newNode : ASTNode  = {
+        actualValue : BigInt(value.text) ,
+        ...value};
+    return newNode;
 }
 
+function applyFloat(value: parsec.Token<TokenKind.Flo>): ASTNode {
+    // extend value to ASTNode
+    const newNode : ASTNode  = {
+        actualValue : parseFloat(value.text) ,
+        ...value};
+    return newNode;
+}
+
+function applyString(value: parsec.Token<TokenKind.Str>): ASTNode {
+    // extend value to ASTNode
+    const newNode : ASTNode  = {
+        // get only text[1,2,...,the second last char]
+        actualValue : value.text.slice(1,value.text.length-1).replace(/\\\"/g, "\"") ,
+        ...value};
+    return newNode;
+}
 ```
 
-parser `identifier`（引用的函數的名稱空間略）。使用`fold_may0`和新的空vector來儲存match多次的parser的符合結果：
+
+製作`CONST`這個parser，然後再加上rule：
+
+```typescript
+const CONST = parsec.rule<TokenKind, ASTNode>();
+/*
+CONST ::=  INT | FLOAT | STRING
+*/
+CONST.setPattern(
+    parsec.alt(
+        parsec.apply(parsec.tok(TokenKind.Int), applyInteger),
+        parsec.apply(parsec.tok(TokenKind.Flo), applyFloat),
+        parsec.apply(parsec.tok(TokenKind.Str), applyString),
+    )
+);
 ```
-pub fn identifier(input : &str) -> IResult<&str, &str>{
-    return recognize(pair(
-        // 1st character is a-z, A-Z or _
-        satisfy(|c| (is_alphabetic(c as u8) || c == '_')),
-        // the tail characters (0+ times matched) storing in a vector
-    fold_many0(
-        // a-z, A-Z, 0-9, _ 
-        satisfy(|c| (is_alphanumeric(c as u8) || c == '_')),
-        // initial vector
-        Vec::new,
-        // once it matches, append the matched item to the vector.
-        |mut acc: Vec<_>, item| {
-          acc.push(item);
-          acc
-        }
-      )))(input);
-    
+
+最後包起來進行測試：
+
+
+```typescript
+function mainParse(inputStr : string){
+    return parsec.expectSingleResult(parsec.expectEOF(
+        CONST.parse(tokenizer.parse(inputStr))));
 }
 
 
+// test
+function main(){
+    // bigint has suffix `n`
+    assert.strictEqual(mainParse('123455667').actualValue, 123455667n);
+    assert.strictEqual(mainParse('000').actualValue, 0n);
+    assert.strictEqual(mainParse('1.22').actualValue, 1.22);
+    assert.strictEqual(mainParse('0.0').actualValue, 0.0);
+    assert.strictEqual(mainParse(`""`).actualValue, "");
+    assert.strictEqual(mainParse(`"the little town"`).actualValue, `the little town`);
+    assert.strictEqual(mainParse(`"\\\"Alice\\\""`).actualValue, `"Alice"`);
+
+
+};
 ```
+
+
+### 表達式
+定義`AST型別`：
+
+```type AST = AST[] | ASTNode;
+```
+
 
 
 ## 平面操作

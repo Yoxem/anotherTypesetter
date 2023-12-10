@@ -1,0 +1,3 @@
+docs/.*#*
+src/ch1/package-lock.json
+src/ch1/node_modules
