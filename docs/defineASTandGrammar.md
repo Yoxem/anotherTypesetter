@@ -44,7 +44,7 @@ C語言、Python語言就算有許多的關鍵字、操作符、符號或是常�
 ## 決定語法
 那我們要如何制定這個語言的語法，這樣我們才能夠寫出符合這個語法的函數，然後再用tokenizer和parser轉成AST樹。
 
-不考慮` + - * /`這種運算子，以及向量的表示子，函數可以用`ID(arg1, arg2, ...)`這種方式來表示，其中`arg_x`是引數，`ID`是識別子（identifier，可以把它想成變函數的名字）。
+函數可以用`ID arg1 arg2`這種方式來表示，其中`arg_x`是引數，`ID`是識別子（identifier，可以把它想成變函數的名字）。
 
 變數可以是`ID`，`arg_n`可以是`ID`或常數（量）。
 
@@ -56,56 +56,48 @@ C語言、Python語言就算有許多的關鍵字、操作符、符號或是常�
 
   - 字串：`'"' (不是「"」的任一字元|('\' '"'))   '"'`（`.`表示任何一個字元）
 
-然而我們還是需要綁定變數`let x = var in boby`（在`body`裡面，`x`指代`var`）、`set x = var`（改變變數值）、lambda`lambda (x)=>{body}`。另外為了要區別要在PDF印上去的一般字元，在這個檔案的常數、變數、函數、關鍵字等前後需要加@表示（但是函數、lambda裡面的變數不用）。比如`@foo(a, b)@`、`@lambda(x)@`、`@"IAmAString"@`、`@2.2@`、`@3@`（後三者應該很少用到）可是若需在PDF印`@`時怎辦？那就用`\@`。比如`foo\@example.com`。
+然而我們還是需要綁定變數`let int x = var in body`（在`body`裡面，`x`指代`var`）、改變變數值）、lambda`fn (int x) (int y) -> + x y`（採用前綴表示法，`+`在前）。另外為了要區別要在PDF印上去的一般字元，在這個檔案的常數、變數、函數、關鍵字等前後需要加@表示（但是函數、lambda裡面的變數不用）。比如`@foo a b@`、`@let int x = 3 in toString (+ x 2)@`、`@"IAmAString"@`、`@2.2@`、`@3@`（後三者應該很少用到）可是若需在PDF印`@`時怎辦？那就用`\@`。比如`foo\@example.com`。
 
 所以我們可以定義以下的BNF風文法：
 
 ```
-Language ::= MainTxt | Exprs | Comment
-
-Comment ::= '/*' (不含'*/'的任何字元組合)* '*/'
-
-
-MainTxt ::= (('\' '@')| 非@非空白字元)+ //顯示的文字。「我是一隻貓」或是「www\@example.com」
-
-// Exprs 表示一群定義變數、常數、函數、函數套用的表達式
-Exprs ::= @ Expr* @ // *表示前面的重複0次以上（包含不出現）
-
-// Comment also included
-// "(" and ")" only for applying function
-Expr ::= (Letting | Setting | Lambda |  | Var| Const) | "(" Applying ")" | Comment
-
-Letting ::= "let" Var "=" Expr "in" Expr // let foo = 12 in ...
-
-Setting ::= Var ":=" Expr "in"  Expr // foo := a in ...
-
-// we force every function have at least 1 argument.
-Lambda ::= "fn" LambdaArgs "->" Expr // fn x y -> 12
-
-LambdaArgs ::= Var | Var LambdaArgs
-
-Applying ::= Expr ExprArgs   // foo 3 9 即foo(3, 9)
-
-ExprArgs ::= Expr | (Expr ExprArgs)
-
-Var ::= ID
-
-Const ::= String | Float | Integer
-
-ID ::=  ("_" | [a-z] |  [A-Z])  ("_" | [0-9] | [a-z] |  [A-Z])+
-
-Integer ::= [0-9]+
-
-Float ::= [0-9]+ "." [0-9]+
-
-String ::= '"' (不是「"」的任一字元|('\' '"'))   '"'
+FLO = \d+[.]\d+ // 浮點數
+INT = \d+ // 整數
+AT = '@' // @
+ID = [_\w][_\d\w]* // 識別子
+R_ARR = [-][>] // 右箭頭 ->
+SEMICOLON = ";"
+// 括號
+L_PAR = '('
+R_PAR = ')'
+ASSIGN = '='
+OP = [+-*/] | [=][=] | [!<>][=] // 運算子
+HASH = [#]
+COM = #[^#]*# # 註解 #
+SPACE = \s+ # 空白字元
+B_SLASH = [\\] // 反斜線
+STR = \"([^"]|[\\\"])*\"
+LIT_STR = ([^\\]?) // 文字模式的不貪婪模式
 ```
 
-而上述的item可以被1個以上半形空白或tab（`\t`）以及1個「`\n`或`\r\n`」（換行符號）隔開。而為求簡化這些符號在MainTxt均指代一個半形空白。也就是空一個半形空白、兩個半形空白、一個tab、一個換行符號等等都會顯示如一個半形符號。而在Expr表達式區，把它忽略掉。另外兩個換行符號設定為換行指令，而這在Expr區會被忽略。所以要加另外兩條：
-
-```
-Space = (' ' | '\t')* | '\n' | '\r\n'
-NewPara = = ('\n' |'\r' '\n' ) ('\n' |'\r' '\n' )
+程式語法定義如下：
+```BNF
+Main ::= (LitStr | Prog)* ; 主體
+LitStr ::= ( not(AT) | B_SLASH AT | B_SLATH HASH)+ ;基本文字模式
+Prog ::= '@' BODY '@' ;程式模式
+BODY ::= LET | EXPR | DEFINE
+DEFINE ::= "define" TYPE VAR ASSIGN BODY SEMICOLON ; 全局定義
+LET ::= "let" TYPE VAR ASSIGN "in" BODY ; 局域定義
+EXPR ::= APPLY | FN | LIST | CONST | VAR | "(" EXPR ")"
+APPLY ::= OP EXPR+ | EXPR EXPR+
+FN ::= "fn" ARGS R_ARR BODY
+ARGS ::= ARG | ARG ARGS
+ARG ::= "(" TYPE VAR ")"
+CONST ::= FLO | STR | INT
+VAR ::= ID
+TYPE ::= ID
+LIST ::= [LIST_INNER]
+LIST_INNER ::= EXPR | EXPR SEMICOLON LIST_INNER
 ```
 
 ## 用ts-parsec和regexp進行tokenize
@@ -163,44 +155,7 @@ thenDo(thenDo(thenDo(sWrapped, match0to9), match0to9), match0to9)
 我們編輯Node.js的進入點程式（假設為src/index.js`），底下為定義tokenizer的型別和regex pattern：
 
 ```typescript
-/** the type of token  */
-enum TokenKind {
-    Int, // 3
-    Flo, // 3.1416
-    Id, // foo, _123, etc
-    At, // @
-    Comt, // comment /*
-    Str, /** "foo" */
-    Assign, /** = */
-    Set, /** := */
-    Keyword, /** let, in */
-    LParen, /** ( */
-    RParen, /** ) */
-    Space, /** semi-width space tab, \r\n? */
-    NewPara, /** breaking paragraph, (\r\n?){2} */
-    MainTxt, /** used in main text */
-}
 
-
-// tokenizer
-const tokenizer = parsec.buildLexer([
-    [true, /^\d+/g, TokenKind.Int],
-    [true, /^\d+\.\d+/g, TokenKind.Flo],
-    [true, /^(let|in)/g, TokenKind.Keyword], // let and in
-    [true, /^[_a-zA-Z][_0-9a-zA-Z]*/g, TokenKind.Id],
-    [true, /^\@/g, TokenKind.At],
-    /* inside comment, only accept 1. non / character
-    or  2. "/ + non * character" */
-    [true, /^\/\*(\/[^*]|[^\\]?)*\*\//g, TokenKind.Comt],
-    [true, /^\"(\\\"|[^\"]?)*\"/g, TokenKind.Str],
-    [true, /^\:\=/g, TokenKind.Set],
-    [true, /^\=/g, TokenKind.Assign],
-    [true, /^\(/g, TokenKind.LParen],
-    [true, /^\)/g, TokenKind.RParen],
-    [true, /^([ \t]+|\n)/g, TokenKind.Space],
-    [true, /^(\r?\n){2}/g, TokenKind.NewPara],
-    [true, /^(\\\@|[^@\s])+/g, TokenKind.MainTxt],
-]);
 ```
 
 ### 常數parsing
