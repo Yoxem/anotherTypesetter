@@ -49,30 +49,50 @@ const tokenizer = p.buildLexer([
     [true,/^\d+[.]\d+/g , TokenKind.Flo],
     [true, /^\d+/g, TokenKind.Int],
     [true,/^[@]/g, TokenKind.At ],
-    [true,/^[_\w][_\d\w]*/g, TokenKind.Id ],
+    [true,/^[_a-zA-Z][_0-9a-zA-Z]*/g, TokenKind.Id ],
     [true,/^->/g , TokenKind.RArr ],
     [true, /^[;]/g, TokenKind.SColon ],
-    [true, /^[(]/g, TokenKind.LPar ],
-    [true, /^[)]/g, TokenKind.RPar ],
+    [true, /^\(/g, TokenKind.LPar ],
+    [true, /^\)/g, TokenKind.RPar ],
     [true, /^[=]/g, TokenKind.Assign ],
     [true, /^([\+\-\*\/]|[!<>=]=)/g, TokenKind.Op ],
     [true, /^#[^#]*#/g, TokenKind.Com ],
     [true, /^[\\]/g, TokenKind.BSlash ],
     [true,/^\"([^"]|[\\\"])*\"/g , TokenKind.Str ],
-    [true, /^([^\\]+?)/g, TokenKind.LitStr ],
     [true, /^\s+/g, TokenKind.Space],
+    [true, /^([^\\]+?)/g, TokenKind.LitStr ],
 ]);
 
 
 
 /** ignore spaces ,new lines, and comments */
-//const _ = p.opt(p.alt(
-//    p.tok(TokenKind.Space),
-//    p.tok(TokenKind.Com),
-//    )
-//);
+const _ = p.opt(p.alt(
+    p.tok(TokenKind.Space),
+    p.tok(TokenKind.Com),
+    )
+);
 
+function applyArg(value: [p.Token<TokenKind>,
+                            p.Token<TokenKind> | undefined,
+                            ASTNode,
+                            p.Token<TokenKind> | undefined,
+                            ASTNode,
+                            p.Token<TokenKind> | undefined,
+                            p.Token<TokenKind>]): AST[]{
 
+    let type = value[2];
+    let variable = value[4];
+
+    return [type, variable];
+}
+
+function applyID(value: p.Token<TokenKind.Id>): ASTNode {
+    // extend value to ASTNode
+    const newNode : ASTNode  = {
+        actualValue : value.text ,
+        ...value};
+    return newNode;
+}
 
 function applyInteger(value: p.Token<TokenKind.Int>): ASTNode {
     // extend value to ASTNode
@@ -99,13 +119,40 @@ function applyString(value: p.Token<TokenKind.Str>): ASTNode {
 
 /** define all the parser sentence */
 const CONST = p.rule<TokenKind, ASTNode>();
-/*const VAR = p.rule<TokenKind, ASTNode>();
-const ARG = p.rule<TokenKind, ASTNode>();
+const VAR = p.rule<TokenKind, ASTNode>();
+const TYPE = p.rule<TokenKind, ASTNode>();
+const ARG = p.rule<TokenKind, AST[]>();
+
+/*
 const EXPR = p.rule<TokenKind, AST>();
 const LETTING = p.rule<TokenKind, AST>();
 const LAMBDA = p.rule<TokenKind, AST>();
 const APPLYING = p.rule<TokenKind, AST>(); */
 
+/** ARG ::= "(" TYPE VAR ")" */
+ARG.setPattern(
+    p.apply(p.seq(
+        p.tok(TokenKind.LPar),
+        _,
+        TYPE,
+        _,
+        VAR,
+        _,
+        p.tok(TokenKind.RPar),
+        ),applyArg)
+);
+
+
+/** VAR ::= ID */
+VAR.setPattern(
+    p.apply(p.tok(TokenKind.Id), applyID),
+);
+/** TYPE ::= ID */
+TYPE.setPattern(
+    p.apply(p.tok(TokenKind.Id), applyID),
+);
+
+/** * CONST ::= FLO | STR | INT */
 CONST.setPattern(
     p.alt(
         p.apply(p.tok(TokenKind.Flo), applyFloat),
@@ -116,9 +163,11 @@ CONST.setPattern(
 );
 
 
+// parse the strings
 function mainParse(inputStr : string){
 return p.expectSingleResult(p.expectEOF(
     CONST.parse(tokenizer.parse(inputStr))));
+    // ARG.parse(tokenizer.parse(inputStr))));
 }
 
 
@@ -126,7 +175,8 @@ return p.expectSingleResult(p.expectEOF(
 function main(){
     assert.strictEqual(<BigInt>mainParse("123").actualValue, 123n);
     assert.strictEqual(<BigInt>mainParse("3.14").actualValue, 3.14);
-    assert.strictEqual(<BigInt>mainParse("\"foo\"").actualValue, "foo");
+    assert.strictEqual(<BigInt>mainParse("\"foo\"").actualValue, "foo"); 
+    //assert.strictEqual(astToSExp(mainParse("( int  a    )")), "(int a)");
 
 
 };

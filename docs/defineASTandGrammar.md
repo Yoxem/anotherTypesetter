@@ -92,10 +92,10 @@ EXPR ::= APPLY | FN | LIST | CONST | VAR | "(" EXPR ")"
 APPLY ::= OP EXPR+ | EXPR EXPR+
 FN ::= "fn" ARGS R_ARR BODY
 ARGS ::= ARG | ARG ARGS
-ARG ::= "(" TYPE VAR ")"
-CONST ::= FLO | STR | INT
-VAR ::= ID
-TYPE ::= ID
+* ARG ::= "(" TYPE VAR ")"
+* CONST ::= FLO | STR | INT
+* VAR ::= ID
+* TYPE ::= ID
 LIST ::= [LIST_INNER]
 LIST_INNER ::= EXPR | EXPR SEMICOLON LIST_INNER
 ```

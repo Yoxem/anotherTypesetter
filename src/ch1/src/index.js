@@ -41,25 +41,34 @@ const tokenizer = p.buildLexer([
     [true, /^\d+[.]\d+/g, TokenKind.Flo],
     [true, /^\d+/g, TokenKind.Int],
     [true, /^[@]/g, TokenKind.At],
-    [true, /^[_\w][_\d\w]*/g, TokenKind.Id],
+    [true, /^[_a-zA-Z][_0-9a-zA-Z]*/g, TokenKind.Id],
     [true, /^->/g, TokenKind.RArr],
     [true, /^[;]/g, TokenKind.SColon],
-    [true, /^[(]/g, TokenKind.LPar],
-    [true, /^[)]/g, TokenKind.RPar],
+    [true, /^\(/g, TokenKind.LPar],
+    [true, /^\)/g, TokenKind.RPar],
     [true, /^[=]/g, TokenKind.Assign],
     [true, /^([\+\-\*\/]|[!<>=]=)/g, TokenKind.Op],
     [true, /^#[^#]*#/g, TokenKind.Com],
     [true, /^[\\]/g, TokenKind.BSlash],
     [true, /^\"([^"]|[\\\"])*\"/g, TokenKind.Str],
-    [true, /^([^\\]+?)/g, TokenKind.LitStr],
     [true, /^\s+/g, TokenKind.Space],
+    [true, /^([^\\]+?)/g, TokenKind.LitStr],
 ]);
 /** ignore spaces ,new lines, and comments */
-//const _ = p.opt(p.alt(
-//    p.tok(TokenKind.Space),
-//    p.tok(TokenKind.Com),
-//    )
-//);
+const _ = p.opt(p.alt(p.tok(TokenKind.Space), p.tok(TokenKind.Com)));
+function applyArg(value) {
+    let type = value[2];
+    let variable = value[4];
+    return [type, variable];
+}
+function applyID(value) {
+    // extend value to ASTNode
+    const newNode = {
+        actualValue: value.text,
+        ...value
+    };
+    return newNode;
+}
 function applyInteger(value) {
     // extend value to ASTNode
     const newNode = {
@@ -85,21 +94,33 @@ function applyString(value) {
 }
 /** define all the parser sentence */
 const CONST = p.rule();
-/*const VAR = p.rule<TokenKind, ASTNode>();
-const ARG = p.rule<TokenKind, ASTNode>();
+const VAR = p.rule();
+const TYPE = p.rule();
+const ARG = p.rule();
+/*
 const EXPR = p.rule<TokenKind, AST>();
 const LETTING = p.rule<TokenKind, AST>();
 const LAMBDA = p.rule<TokenKind, AST>();
 const APPLYING = p.rule<TokenKind, AST>(); */
+/** ARG ::= "(" TYPE VAR ")" */
+ARG.setPattern(p.apply(p.seq(p.tok(TokenKind.LPar), _, TYPE, _, VAR, _, p.tok(TokenKind.RPar)), applyArg));
+/** VAR ::= ID */
+VAR.setPattern(p.apply(p.tok(TokenKind.Id), applyID));
+/** TYPE ::= ID */
+TYPE.setPattern(p.apply(p.tok(TokenKind.Id), applyID));
+/** * CONST ::= FLO | STR | INT */
 CONST.setPattern(p.alt(p.apply(p.tok(TokenKind.Flo), applyFloat), p.apply(p.tok(TokenKind.Int), applyInteger), p.apply(p.tok(TokenKind.Str), applyString)));
+// parse the strings
 function mainParse(inputStr) {
     return p.expectSingleResult(p.expectEOF(CONST.parse(tokenizer.parse(inputStr))));
+    // ARG.parse(tokenizer.parse(inputStr))));
 }
 // test
 function main() {
     assert.strictEqual(mainParse("123").actualValue, 123n);
     assert.strictEqual(mainParse("3.14").actualValue, 3.14);
     assert.strictEqual(mainParse("\"foo\"").actualValue, "foo");
+    //assert.strictEqual(astToSExp(mainParse("( int  a    )")), "(int a)");
 }
 ;
 main();
