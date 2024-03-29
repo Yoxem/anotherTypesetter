@@ -1,0 +1,22 @@
+{
+  "name": "anothertypesetter",
+  "version": "0.0.1",
+  "description": "Another typesetter",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://git.kianting.info/src/anotherTypesetter"
+  },
+  "keywords": [
+    "typesetting"
+  ],
+  "author": "Tan Kian-ting",
+  "license": "MIT",
+  "dependencies": {
+    "@lahmatiy/jison": "^0.4.18-remastered.7",
+    "typescript": "^5.4.3"
+  }
+}
