@@ -25,6 +25,7 @@ var ItemType;
     ItemType[ItemType["Id"] = 2] = "Id";
     ItemType[ItemType["Str"] = 3] = "Str";
     ItemType[ItemType["Bool"] = 4] = "Bool";
+    ItemType[ItemType["Clos"] = 5] = "Clos";
 })(ItemType || (ItemType = {}));
 const tokenizer = (0, typescript_parsec_1.buildLexer)([
     [true, /^\d+/g, TokenKind.Int],
@@ -126,9 +127,9 @@ SINGLE.setPattern((0, typescript_parsec_2.alt)((0, typescript_parsec_2.apply)((0
 LISPS.setPattern((0, typescript_parsec_2.alt)((0, typescript_parsec_2.apply)((0, typescript_parsec_2.kmid)((0, typescript_parsec_2.seq)((0, typescript_parsec_2.str)("("), __), (0, typescript_parsec_2.rep_sc)(LISP), (0, typescript_parsec_2.str)(")")), applyList), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.kright)((0, typescript_parsec_2.str)("'"), (0, typescript_parsec_2.kmid)((0, typescript_parsec_2.seq)((0, typescript_parsec_2.str)("("), __), (0, typescript_parsec_2.rep_sc)(LISP), (0, typescript_parsec_2.str)(")"))), applyQuoted)));
 CON_STR_INNER.setPattern((0, typescript_parsec_2.alt)((0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.Id), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.Int), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.Flo), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.Str), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.Other), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.SpaceNL), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.kright)((0, typescript_parsec_2.tok)(TokenKind.BSlash), (0, typescript_parsec_2.tok)(TokenKind.LParen)), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.kright)((0, typescript_parsec_2.tok)(TokenKind.BSlash), (0, typescript_parsec_2.tok)(TokenKind.RParen)), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.kright)((0, typescript_parsec_2.tok)(TokenKind.BSlash), (0, typescript_parsec_2.tok)(TokenKind.LBrack)), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.kright)((0, typescript_parsec_2.tok)(TokenKind.BSlash), (0, typescript_parsec_2.tok)(TokenKind.RBrack)), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.kright)((0, typescript_parsec_2.tok)(TokenKind.BSlash), (0, typescript_parsec_2.tok)(TokenKind.Apos)), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.kright)((0, typescript_parsec_2.tok)(TokenKind.BSlash), (0, typescript_parsec_2.tok)(TokenKind.BSlash)), bSlashTokenToStr), LISPS));
 CON_STR.setPattern((0, typescript_parsec_2.apply)((0, typescript_parsec_2.kmid)((0, typescript_parsec_2.str)("["), (0, typescript_parsec_2.rep_sc)(CON_STR_INNER), (0, typescript_parsec_2.str)("]")), applyStrings));
-function printAST(ast) {
+function astToString(ast) {
     if (Array.isArray(ast)) {
-        let ast2 = ast.map(printAST);
+        let ast2 = ast.map(astToString);
         return "(" + ast2.join(" ") + ")";
     }
     else {
@@ -143,6 +144,11 @@ function printAST(ast) {
         }
         else if (ast.type == ItemType.Bool) {
             return ast.bool.toString();
+        }
+        else if (ast.type == ItemType.Clos) {
+            let binding = astToString(ast.vars);
+            let body = astToString(ast.body);
+            return `<closure; binding : ${binding}, body : ${body}>`;
         }
         else {
             return ast.int.toString();
@@ -201,15 +207,40 @@ function extendEnv(env, vari, data) {
     return env;
 }
 var emptyEnv = {};
+/**
+ * @throws {Error}
+ */
+function invalidLengthException(id, no) {
+    return new Error(`the number of args for ${id} should be ${no}.`);
+}
+function isItemArray(x) {
+    return x[0].hasOwnProperty('type');
+}
 function interp(prog, env) {
     if (Array.isArray(prog)) {
         if (!Array.isArray(prog[0])) {
             let op = prog[0];
             if (op.type == ItemType.Id) {
-                if (op.id == "let") {
+                if (op.id == "lambda") {
+                    let vars = prog[1];
+                    if (prog.length != 3) {
+                        throw invalidLengthException('lambda', 3);
+                    }
+                    else if (!isItemArray(vars)) {
+                        throw new Error("the vars of lambda should be a list of items");
+                    }
+                    else {
+                        return {
+                            type: ItemType.Clos,
+                            vars: vars,
+                            body: prog[2],
+                        };
+                    }
+                }
+                else if (op.id == "let") {
                     let bindings = prog[1];
                     if (prog.length != 3) {
-                        throw new Error("the number of args for 'let' should be 2.");
+                        throw invalidLengthException('let', 3);
                     }
                     else if (!Array.isArray(bindings)) {
                         throw new Error("the bindings should be array");
@@ -220,7 +251,7 @@ function interp(prog, env) {
                             let binding = bindings[i];
                             if (!Array.isArray(binding)
                                 || (binding).length != 2) {
-                                throw new Error("mall formed of let.");
+                                throw new Error("malformed of let.");
                             }
                             else {
                                 let vari = binding[0];
@@ -236,7 +267,7 @@ function interp(prog, env) {
                 }
                 else if (op.id == "if") {
                     if (prog.length != 4) {
-                        throw new Error("the args of if should be 2.");
+                        throw invalidLengthException('if', 4);
                     }
                     else {
                         let cond = interp(prog[1], env);
@@ -304,7 +335,7 @@ function interp(prog, env) {
 function evaluate(expr) {
     let a = (0, typescript_parsec_1.expectSingleResult)((0, typescript_parsec_1.expectEOF)(LISP.parse(tokenizer.parse(expr))));
     let interped = interp(a, emptyEnv);
-    console.log(printAST(interped));
+    console.log(astToString(interped));
     return a;
 }
 //evaluate(`(main '((text 12)) [ 快狐跳懶狗\\\\\\\[\\\]\\\(\\\)(italic "fox and dog") (bold [OK])])`)

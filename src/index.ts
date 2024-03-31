@@ -40,9 +40,10 @@ enum ItemType {
   Id,
   Str,
   Bool,
+  Clos,
 }
 
-type Item = ItemStr | ItemInt | ItemId | ItemFlo | ItemBool;
+type Item = ItemStr | ItemInt | ItemId | ItemFlo | ItemBool | Closure;
 
 interface ItemStr {
   type: ItemType.Str;
@@ -72,6 +73,12 @@ interface ItemBool {
 
 interface Env {
   [Key: string]: AST[];
+}
+
+interface Closure{
+    type: ItemType.Clos;
+    vars : Item[];
+    body : AST;
 }
 
 type AST = Item | AST[];
@@ -231,9 +238,9 @@ CON_STR.setPattern(
   apply(kmid(str("["), rep_sc(CON_STR_INNER), str("]")), applyStrings)
 );
 
-function printAST(ast: AST): string {
+function astToString(ast: AST): string {
   if (Array.isArray(ast)) {
-    let ast2 = ast.map(printAST);
+    let ast2 = ast.map(astToString);
     return "(" + ast2.join(" ") + ")";
   } else {
     if (ast.type == ItemType.Str) {
@@ -244,7 +251,12 @@ function printAST(ast: AST): string {
       return ast.flo.toString();
     } else if (ast.type == ItemType.Bool) {
         return ast.bool.toString();
-      } else {
+    }else if (ast.type == ItemType.Clos){
+        let binding = astToString(ast.vars);
+        let body = astToString(ast.body);
+        return `<closure; binding : ${binding}, body : ${body}>`;
+    }
+     else {
       return ast.int.toString();
     }
   }
@@ -302,15 +314,42 @@ function extendEnv(env : Env, vari : string, data : AST) : Env{
 }
 var emptyEnv: Env = {};
 
+/** 
+ * @throws {Error}
+ */
+function invalidLengthException( id : string, no : number) : Error{
+    return new Error(`the number of args for ${id} should be ${no}.`);
+}
+
+function isItemArray(x: any): x is Item[] {
+    return x[0].hasOwnProperty('type');
+  }
+
 function interp(prog: AST, env: Env): AST {
   if (Array.isArray(prog)) {
     if (!Array.isArray(prog[0])) {
       let op = prog[0];
       if (op.type == ItemType.Id) {
-        if (op.id == "let"){
+        if (op.id == "lambda"){
+            let vars = prog[1];
+            if (prog.length != 3){
+                throw invalidLengthException('lambda', 3);
+            }
+            else if (!isItemArray(vars)){
+                throw new Error("the vars of lambda should be a list of items");
+            }
+            else{
+                return {
+                    type: ItemType.Clos,
+                    vars: vars,
+                    body: prog[2],
+                }
+            }
+        }
+        else if (op.id == "let"){
             let bindings = prog[1];
             if (prog.length != 3){
-                throw new Error("the number of args for 'let' should be 2.");
+                throw invalidLengthException('let', 3);
             }
             else if (!Array.isArray(bindings)){
                 throw new Error("the bindings should be array");
@@ -322,7 +361,7 @@ function interp(prog: AST, env: Env): AST {
                     let binding = bindings[i];
                     if (!Array.isArray(binding)
                         || (<AST[]>(binding)).length != 2){
-                        throw new Error("mall formed of let.")
+                        throw new Error("malformed of let.")
                     }else{
                         let vari = binding[0];
                         if (vari.hasOwnProperty("id")){
@@ -338,7 +377,7 @@ function interp(prog: AST, env: Env): AST {
         }
         else if(op.id == "if"){
             if (prog.length != 4){
-                throw new Error("the args of if should be 2.");
+                throw invalidLengthException('if', 4);
             }else{
                 let cond = interp(prog[1], env);
                 if (Array.isArray(cond)){
@@ -395,7 +434,7 @@ function interp(prog: AST, env: Env): AST {
 function evaluate(expr: string): AST {
   let a = expectSingleResult(expectEOF(LISP.parse(tokenizer.parse(expr))));
   let interped = interp(a, emptyEnv);
-  console.log(printAST(interped));
+  console.log(astToString(interped));
   return a;
 }
 
