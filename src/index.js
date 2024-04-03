@@ -32,7 +32,7 @@ const tokenizer = (0, typescript_parsec_1.buildLexer)([
     [true, /^\d+\.\d+/g, TokenKind.Flo],
     [true, /^true/g, TokenKind.Bool],
     [true, /^false/g, TokenKind.Bool],
-    [true, /^[+\-*/a-zA-Z_][0-9+\-*/a-zA-Z_]*/g, TokenKind.Id],
+    [true, /^([+\-*/a-zA-Z_][0-9+\-*/a-zA-Z_]*|[<>]=?|==)/g, TokenKind.Id],
     [true, /^\"([^\"]|\\\")+\"/g, TokenKind.Str],
     [true, /^[(]/g, TokenKind.LParen],
     [true, /^[)]/g, TokenKind.RParen],
@@ -158,18 +158,29 @@ function astToString(ast) {
 function isItem(x) {
     return !Array.isArray(x);
 }
-function interpBinary(op, argsMapped) {
-    // x + y
+function interpBinary(op, argsMapped, isBool) {
     let fst = argsMapped[0];
     let snd = argsMapped[1];
     if (argsMapped.length == 2 && isItem(fst) && isItem(snd)) {
         if (fst.type == ItemType.Flo && snd.type == ItemType.Flo) {
+            if (isBool == true) {
+                return {
+                    type: ItemType.Bool,
+                    bool: op(fst.flo, snd.flo),
+                };
+            }
             return {
                 type: ItemType.Flo,
                 flo: op(fst.flo, snd.flo),
             };
         }
         else if (fst.type == ItemType.Int && snd.type == ItemType.Int) {
+            if (isBool == true) {
+                return {
+                    type: ItemType.Bool,
+                    bool: op(fst.int, snd.int),
+                };
+            }
             return {
                 type: ItemType.Int,
                 int: op(fst.int, snd.int),
@@ -195,6 +206,21 @@ function mul(x, y) {
 function div(x, y) {
     return x / y;
 }
+function lt(x, y) {
+    return x < y;
+}
+function gt(x, y) {
+    return x > y;
+}
+function eq(x, y) {
+    return x == y;
+}
+function le(x, y) {
+    return x <= y;
+}
+function ge(x, y) {
+    return x >= y;
+}
 function extendEnv(env, vari, data) {
     // add var
     if (!(vari in env)) {
@@ -217,6 +243,7 @@ function isItemArray(x) {
     return x[0].hasOwnProperty('type');
 }
 function interp(prog, env) {
+    console.log(astToString(prog));
     if (Array.isArray(prog)) {
         if (!Array.isArray(prog[0])) {
             let op = prog[0];
@@ -257,7 +284,7 @@ function interp(prog, env) {
                                 let vari = binding[0];
                                 if (vari.hasOwnProperty("id")) {
                                     let variName = vari.id;
-                                    newEnv = extendEnv(newEnv, variName, binding[1]);
+                                    newEnv = extendEnv(newEnv, variName, interp(binding[1], env));
                                 }
                             }
                         }
@@ -302,10 +329,42 @@ function interp(prog, env) {
                     }
                     else if (op.id == "/") {
                         return interpBinary(div, argsMapped);
+                        // bool calculation
+                    }
+                    else if (op.id == ">") {
+                        return interpBinary(gt, argsMapped, true);
+                    }
+                    else if (op.id == "<") {
+                        return interpBinary(lt, argsMapped, true);
+                    }
+                    else if (op.id == ">=") {
+                        return interpBinary(ge, argsMapped, true);
+                    }
+                    else if (op.id == "<=") {
+                        return interpBinary(le, argsMapped, true);
+                    }
+                    else if (op.id == "==") {
+                        return interpBinary(eq, argsMapped, true);
                         // other named function call
                     }
                     else {
-                        throw new Error("todo for other id");
+                        let caller = interp(prog[0], env);
+                        let varArgs = caller.vars;
+                        let varArgLen = varArgs.length;
+                        let argsMappedLen = argsMapped.length;
+                        if (argsMappedLen != varArgLen) {
+                            throw new Error("the number of the arguments is"
+                                + " not the same of that of the input vars.");
+                        }
+                        else {
+                            var newEnv = env;
+                            var fuBody = caller.body;
+                            for (var i = 0; i < argsMapped.length; i++) {
+                                newEnv = extendEnv(env, varArgs[i].id, argsMapped[i]);
+                            }
+                            return interp(fuBody, newEnv);
+                        }
+                        throw new Error("aaaa");
                     }
                 }
                 // the caller should not be a non-id constant
@@ -333,10 +392,9 @@ function interp(prog, env) {
     }
 }
 function evaluate(expr) {
-    let a = (0, typescript_parsec_1.expectSingleResult)((0, typescript_parsec_1.expectEOF)(LISP.parse(tokenizer.parse(expr))));
-    let interped = interp(a, emptyEnv);
-    console.log(astToString(interped));
-    return a;
+    let input = (0, typescript_parsec_1.expectSingleResult)((0, typescript_parsec_1.expectEOF)(LISP.parse(tokenizer.parse(expr))));
+    let interped = interp(input, emptyEnv);
+    return astToString(interped);
 }
 //evaluate(`(main '((text 12)) [ 快狐跳懶狗\\\\\\\[\\\]\\\(\\\)(italic "fox and dog") (bold [OK])])`)
 //evaluate("@(let (a 17) (+ a 10))@")

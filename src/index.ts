@@ -1,3 +1,4 @@
+import { validateHeaderName } from "http";
 import { Token } from "typescript-parsec";
 import {
   buildLexer,
@@ -88,7 +89,7 @@ const tokenizer = buildLexer([
   [true, /^\d+\.\d+/g, TokenKind.Flo],
   [true, /^true/g, TokenKind.Bool],
   [true, /^false/g, TokenKind.Bool],
-  [true, /^[+\-*/a-zA-Z_][0-9+\-*/a-zA-Z_]*/g, TokenKind.Id],
+  [true, /^([+\-*/a-zA-Z_][0-9+\-*/a-zA-Z_]*|[<>]=?|==)/g, TokenKind.Id],
   [true, /^\"([^\"]|\\\")+\"/g, TokenKind.Str],
   [true, /^[(]/g, TokenKind.LParen],
   [true, /^[)]/g, TokenKind.RParen],
@@ -266,17 +267,29 @@ function isItem(x: AST): x is Item {
   return !Array.isArray(x);
 }
 
-function interpBinary(op: Function, argsMapped: AST[]): ItemFlo | ItemInt {
-  // x + y
+function interpBinary(op: Function, argsMapped: AST[], isBool? : boolean): ItemFlo | ItemInt | ItemBool {
   let fst = argsMapped[0];
   let snd = argsMapped[1];
   if (argsMapped.length == 2 && isItem(fst) && isItem(snd)) {
     if (fst.type == ItemType.Flo && snd.type == ItemType.Flo) {
+      if (isBool == true){
+        return {
+          type: ItemType.Bool,
+          bool: op(fst.flo, snd.flo),
+        };
+      }
       return {
         type: ItemType.Flo,
         flo: op(fst.flo, snd.flo),
       };
+
     } else if (fst.type == ItemType.Int && snd.type == ItemType.Int) {
+      if (isBool == true){
+        return {
+          type: ItemType.Bool,
+          bool: op(fst.int, snd.int),
+        };
+      }
       return {
         type: ItemType.Int,
         int: op(fst.int, snd.int),
@@ -300,6 +313,21 @@ function mul(x: number, y: number): number {
 }
 function div(x: number, y: number): number {
   return x / y;
+}
+function lt(x: number, y: number): boolean {
+  return x < y;
+}
+function gt(x: number, y: number): boolean {
+  return x > y;
+}
+function eq(x: number, y: number): boolean {
+  return x == y;
+}
+function le(x: number, y: number): boolean {
+  return x <= y;
+}
+function ge(x: number, y: number): boolean {
+  return x >= y;
 }
 
 function extendEnv(env : Env, vari : string, data : AST) : Env{
@@ -326,10 +354,15 @@ function isItemArray(x: any): x is Item[] {
   }
 
 function interp(prog: AST, env: Env): AST {
+  console.log(astToString(prog));
   if (Array.isArray(prog)) {
     if (!Array.isArray(prog[0])) {
       let op = prog[0];
       if (op.type == ItemType.Id) {
+        // a list
+        if (op.id == "quote"){
+          
+        }
         if (op.id == "lambda"){
             let vars = prog[1];
             if (prog.length != 3){
@@ -366,7 +399,8 @@ function interp(prog: AST, env: Env): AST {
                         let vari = binding[0];
                         if (vari.hasOwnProperty("id")){
                             let variName = (<ItemId>vari).id;
-                            newEnv = extendEnv(newEnv, variName , binding[1]);
+                            newEnv = extendEnv(newEnv, variName , interp(binding[1], env));
+                            
                         }
 
                     }
@@ -406,9 +440,38 @@ function interp(prog: AST, env: Env): AST {
           return interpBinary(mul, argsMapped);
         } else if (op.id == "/") {
           return interpBinary(div, argsMapped);
+        // bool calculation
+        } else if (op.id == ">") {
+          return interpBinary(gt, argsMapped,true);
+        } else if (op.id == "<") {
+          return interpBinary(lt, argsMapped,true);
+        } else if (op.id == ">=") {
+          return interpBinary(ge, argsMapped,true);
+        } else if (op.id == "<=") {
+          return interpBinary(le, argsMapped,true);
+        } else if (op.id == "==") {
+          return interpBinary(eq, argsMapped,true);
         // other named function call
         } else {
-          throw new Error("todo for other id");
+          let caller = interp(prog[0],env);
+
+          let varArgs = (<ItemId[]>(<Closure>caller).vars);
+          let varArgLen = varArgs.length;
+          let argsMappedLen = argsMapped.length;
+          if (argsMappedLen != varArgLen){
+            throw new Error("the number of the arguments is"
+            +" not the same of that of the input vars.");
+          }else{
+            var newEnv = env;
+            var fuBody = (<Closure>caller).body;
+            for(var i=0;i<argsMapped.length;i++){
+              newEnv = extendEnv(env, varArgs[i].id, argsMapped[i]);
+            }
+            return interp(fuBody, newEnv);
+            
+          }
+
+          throw new Error("aaaa");
         }}
       // the caller should not be a non-id constant
       } else {
@@ -431,11 +494,10 @@ function interp(prog: AST, env: Env): AST {
   }
 }
 
-function evaluate(expr: string): AST {
-  let a = expectSingleResult(expectEOF(LISP.parse(tokenizer.parse(expr))));
-  let interped = interp(a, emptyEnv);
-  console.log(astToString(interped));
-  return a;
+function evaluate(expr: string): string {
+  let input = expectSingleResult(expectEOF(LISP.parse(tokenizer.parse(expr))));
+  let interped = interp(input, emptyEnv);
+  return astToString(interped);
 }
 
 //evaluate(`(main '((text 12)) [ 快狐跳懶狗\\\\\\\[\\\]\\\(\\\)(italic "fox and dog") (bold [OK])])`)
