@@ -42,9 +42,10 @@ enum ItemType {
   Str,
   Bool,
   Clos,
+  Ls,
 }
 
-type Item = ItemStr | ItemInt | ItemId | ItemFlo | ItemBool | Closure;
+type Item = ItemStr | ItemInt | ItemId | ItemFlo | ItemBool | Closure | List;
 
 interface ItemStr {
   type: ItemType.Str;
@@ -69,6 +70,11 @@ interface ItemFlo {
 interface ItemBool {
     type: ItemType.Bool;
     bool: boolean;
+  }
+
+interface List {
+    type: ItemType.Ls;
+    list: AST[];
   }
   
 
@@ -256,6 +262,9 @@ function astToString(ast: AST): string {
         let binding = astToString(ast.vars);
         let body = astToString(ast.body);
         return `<closure; binding : ${binding}, body : ${body}>`;
+    }else if (ast.type == ItemType.Ls){
+      let body = astToString(ast.list);
+      return "'"+body;
     }
      else {
       return ast.int.toString();
@@ -330,6 +339,20 @@ function ge(x: number, y: number): boolean {
   return x >= y;
 }
 
+/** list manipulation */
+function car(x : List) : Item {
+  let fst = (<AST[]>x.list)[0];
+  if (Array.isArray(fst)){
+    let rtnList : List = {
+      type: ItemType.Ls,
+      list: fst,
+  }
+  return rtnList;
+}else{
+  return fst;
+}
+}
+
 function extendEnv(env : Env, vari : string, data : AST) : Env{
     // add var
     if (!(vari in env)){
@@ -361,12 +384,20 @@ function interp(prog: AST, env: Env): AST {
       if (op.type == ItemType.Id) {
         // a list
         if (op.id == "quote"){
-          
+          let body = prog[1];
+          if (!Array.isArray(body)){
+            throw new Error("the argument of quote, aka: "+body+", is not a list.");
+          }else{
+          return {
+            type: ItemType.Ls,
+            list: body,
         }
-        if (op.id == "lambda"){
+      }
+        }
+        else if (op.id == "lambda"){
             let vars = prog[1];
             if (prog.length != 3){
-                throw invalidLengthException('lambda', 3);
+                throw invalidLengthException('lambda', 2);
             }
             else if (!isItemArray(vars)){
                 throw new Error("the vars of lambda should be a list of items");
@@ -382,7 +413,7 @@ function interp(prog: AST, env: Env): AST {
         else if (op.id == "let"){
             let bindings = prog[1];
             if (prog.length != 3){
-                throw invalidLengthException('let', 3);
+                throw invalidLengthException('let', 2);
             }
             else if (!Array.isArray(bindings)){
                 throw new Error("the bindings should be array");
@@ -411,7 +442,7 @@ function interp(prog: AST, env: Env): AST {
         }
         else if(op.id == "if"){
             if (prog.length != 4){
-                throw invalidLengthException('if', 4);
+                throw invalidLengthException('if', 3);
             }else{
                 let cond = interp(prog[1], env);
                 if (Array.isArray(cond)){
@@ -451,6 +482,15 @@ function interp(prog: AST, env: Env): AST {
           return interpBinary(le, argsMapped,true);
         } else if (op.id == "==") {
           return interpBinary(eq, argsMapped,true);
+        } else if (op.id == "car") {
+          let arg = argsMapped[0];
+          if (prog.length != 2){
+            throw invalidLengthException('car', 1);
+          }else if (!arg.hasOwnProperty('type') || (<Item>arg).type != ItemType.Ls){
+            throw new Error("the arg of 'car' is not a list.")
+          }else{
+            return car((<List>arg));
+          }
         // other named function call
         } else {
           let caller = interp(prog[0],env);
@@ -471,7 +511,6 @@ function interp(prog: AST, env: Env): AST {
             
           }
 
-          throw new Error("aaaa");
         }}
       // the caller should not be a non-id constant
       } else {

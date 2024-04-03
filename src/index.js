@@ -26,6 +26,7 @@ var ItemType;
     ItemType[ItemType["Str"] = 3] = "Str";
     ItemType[ItemType["Bool"] = 4] = "Bool";
     ItemType[ItemType["Clos"] = 5] = "Clos";
+    ItemType[ItemType["Ls"] = 6] = "Ls";
 })(ItemType || (ItemType = {}));
 const tokenizer = (0, typescript_parsec_1.buildLexer)([
     [true, /^\d+/g, TokenKind.Int],
@@ -150,6 +151,10 @@ function astToString(ast) {
             let body = astToString(ast.body);
             return `<closure; binding : ${binding}, body : ${body}>`;
         }
+        else if (ast.type == ItemType.Ls) {
+            let body = astToString(ast.list);
+            return "'" + body;
+        }
         else {
             return ast.int.toString();
         }
@@ -221,6 +226,20 @@ function le(x, y) {
 function ge(x, y) {
     return x >= y;
 }
+/** list manipulation */
+function car(x) {
+    let fst = x.list[0];
+    if (Array.isArray(fst)) {
+        let rtnList = {
+            type: ItemType.Ls,
+            list: fst,
+        };
+        return rtnList;
+    }
+    else {
+        return fst;
+    }
+}
 function extendEnv(env, vari, data) {
     // add var
     if (!(vari in env)) {
@@ -248,10 +267,23 @@ function interp(prog, env) {
         if (!Array.isArray(prog[0])) {
             let op = prog[0];
             if (op.type == ItemType.Id) {
-                if (op.id == "lambda") {
+                // a list
+                if (op.id == "quote") {
+                    let body = prog[1];
+                    if (!Array.isArray(body)) {
+                        throw new Error("the argument of quote, aka: " + body + ", is not a list.");
+                    }
+                    else {
+                        return {
+                            type: ItemType.Ls,
+                            list: body,
+                        };
+                    }
+                }
+                else if (op.id == "lambda") {
                     let vars = prog[1];
                     if (prog.length != 3) {
-                        throw invalidLengthException('lambda', 3);
+                        throw invalidLengthException('lambda', 2);
                     }
                     else if (!isItemArray(vars)) {
                         throw new Error("the vars of lambda should be a list of items");
@@ -267,7 +299,7 @@ function interp(prog, env) {
                 else if (op.id == "let") {
                     let bindings = prog[1];
                     if (prog.length != 3) {
-                        throw invalidLengthException('let', 3);
+                        throw invalidLengthException('let', 2);
                     }
                     else if (!Array.isArray(bindings)) {
                         throw new Error("the bindings should be array");
@@ -294,7 +326,7 @@ function interp(prog, env) {
                 }
                 else if (op.id == "if") {
                     if (prog.length != 4) {
-                        throw invalidLengthException('if', 4);
+                        throw invalidLengthException('if', 3);
                     }
                     else {
                         let cond = interp(prog[1], env);
@@ -345,6 +377,18 @@ function interp(prog, env) {
                     }
                     else if (op.id == "==") {
                         return interpBinary(eq, argsMapped, true);
+                    }
+                    else if (op.id == "car") {
+                        let arg = argsMapped[0];
+                        if (prog.length != 2) {
+                            throw invalidLengthException('car', 1);
+                        }
+                        else if (!arg.hasOwnProperty('type') || arg.type != ItemType.Ls) {
+                            throw new Error("the arg of 'car' is not a list.");
+                        }
+                        else {
+                            return car(arg);
+                        }
                         // other named function call
                     }
                     else {
@@ -364,7 +408,6 @@ function interp(prog, env) {
                             }
                             return interp(fuBody, newEnv);
                         }
-                        throw new Error("aaaa");
                     }
                 }
                 // the caller should not be a non-id constant
