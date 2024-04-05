@@ -240,14 +240,14 @@ function car(x) {
         return fst;
     }
 }
-function extendEnv(env, vari, data) {
+function extendEnv(env, vari, isRec, data) {
     // add var
     if (!(vari in env)) {
-        env[vari] = [data];
+        env[vari] = [{ isRec: isRec, value: data }];
         // update
     }
     else {
-        env[vari] = [data].concat(env[vari]);
+        env[vari] = [{ isRec: isRec, value: data }].concat(env[vari]);
     }
     return env;
 }
@@ -261,8 +261,13 @@ function invalidLengthException(id, no) {
 function isItemArray(x) {
     return x[0].hasOwnProperty('type');
 }
+function isItemId(x) {
+    return x.hasOwnProperty('type') && x.hasOwnProperty('id');
+}
+function isClosure(x) {
+    return x.hasOwnProperty('type') && x.hasOwnProperty('vars');
+}
 function interp(prog, env) {
-    console.log(astToString(prog));
     if (Array.isArray(prog)) {
         if (!Array.isArray(prog[0])) {
             let op = prog[0];
@@ -280,6 +285,7 @@ function interp(prog, env) {
                         };
                     }
                 }
+                /**lambda */
                 else if (op.id == "lambda") {
                     let vars = prog[1];
                     if (prog.length != 3) {
@@ -291,32 +297,50 @@ function interp(prog, env) {
                     else {
                         return {
                             type: ItemType.Clos,
+                            env: env,
                             vars: vars,
                             body: prog[2],
                         };
                     }
                 }
-                else if (op.id == "let") {
+                /** let function */
+                else if (op.id == "let" || op.id == "letrec") {
                     let bindings = prog[1];
                     if (prog.length != 3) {
-                        throw invalidLengthException('let', 2);
+                        if (op.id == "let") {
+                            throw invalidLengthException('let', 2);
+                        }
+                        else {
+                            throw invalidLengthException('letrec', 2);
+                        }
                     }
                     else if (!Array.isArray(bindings)) {
                         throw new Error("the bindings should be array");
                     }
                     else {
-                        var newEnv = env;
+                        var newEnv = structuredClone(env);
                         for (var i = 0; i < bindings.length; i++) {
                             let binding = bindings[i];
                             if (!Array.isArray(binding)
                                 || (binding).length != 2) {
-                                throw new Error("malformed of let.");
+                                if (op.id == "let") {
+                                    throw new Error("malformed of let.");
+                                }
+                                else {
+                                    throw new Error("malformed of letrec.");
+                                }
                             }
                             else {
                                 let vari = binding[0];
                                 if (vari.hasOwnProperty("id")) {
                                     let variName = vari.id;
-                                    newEnv = extendEnv(newEnv, variName, interp(binding[1], env));
+                                    let data = interp(binding[1], env);
+                                    if (op.id == "letrec") {
+                                        newEnv = extendEnv(newEnv, variName, true, data);
+                                    }
+                                    else {
+                                        newEnv = extendEnv(newEnv, variName, false, data);
+                                    }
                                 }
                             }
                         }
@@ -324,6 +348,7 @@ function interp(prog, env) {
                         return interp(body, newEnv);
                     }
                 }
+                // end of let
                 else if (op.id == "if") {
                     if (prog.length != 4) {
                         throw invalidLengthException('if', 3);
@@ -401,10 +426,22 @@ function interp(prog, env) {
                                 + " not the same of that of the input vars.");
                         }
                         else {
-                            var newEnv = env;
+                            var newEnv = structuredClone(caller.env);
+                            for (var i = 0; i < Object.keys(env).length; i++) {
+                                let currentKey = Object.keys(env)[i];
+                                let currentValue = env[currentKey];
+                                if (currentValue[0].isRec !== undefined && currentValue[0].isRec == true) {
+                                    newEnv = extendEnv(newEnv, currentKey, true, currentValue[0].value);
+                                }
+                            }
                             var fuBody = caller.body;
                             for (var i = 0; i < argsMapped.length; i++) {
-                                newEnv = extendEnv(env, varArgs[i].id, argsMapped[i]);
+                                let varArg = varArgs[i];
+                                var varArgIsRec = false;
+                                if (varArg.isRec !== undefined && varArg.isRec == true) {
+                                    varArgIsRec = true;
+                                }
+                                newEnv = extendEnv(newEnv, varArgs[i].id, varArgIsRec, argsMapped[i]);
                             }
                             return interp(fuBody, newEnv);
                         }
@@ -418,19 +455,42 @@ function interp(prog, env) {
             // the caller which is a higher-function call
         }
         else {
-            throw new Error("todo for ((lambda arg ) arg)");
+            let argsMapped = prog.slice(1).map((x) => {
+                return interp(x, env);
+            });
+            let caller = interp(prog[0], env);
+            let varArgs = caller.vars;
+            let varArgLen = varArgs.length;
+            let argsMappedLen = argsMapped.length;
+            if (argsMappedLen != varArgLen) {
+                throw new Error("the number of the arguments is"
+                    + " not the same of that of the input vars.");
+            }
+            else {
+                var fuBody = caller.body;
+                var newEnv = structuredClone(env);
+                // for recursion function usage
+                for (var i = 0; i < argsMapped.length; i++) {
+                    var varArgIsRec = false;
+                    if (varArgs[i].isRec !== undefined && varArgs[i].isRec == true) {
+                        varArgIsRec = true;
+                    }
+                    newEnv = extendEnv(newEnv, varArgs[i].id, varArgIsRec, argsMapped[i]);
+                }
+                return interp(fuBody, newEnv);
+            }
         }
     }
     else {
         // constant
         if (prog.type != ItemType.Id) {
             return prog;
-            // variable
         }
+        // other variable
         else {
             let varName = prog.id;
-            let value = env[varName][0];
-            return value;
+            let isRecAndVal = env[varName][0];
+            return isRecAndVal.value;
         }
     }
 }

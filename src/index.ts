@@ -60,6 +60,7 @@ interface ItemInt {
 interface ItemId {
   type: ItemType.Id;
   id: string;
+  isRec? : boolean; /** is it recursive function */
 }
 
 interface ItemFlo {
@@ -76,15 +77,20 @@ interface List {
     type: ItemType.Ls;
     list: AST[];
   }
-  
+
+interface EnvValue{
+  isRec : boolean;
+  value : AST;
+}
 
 interface Env {
-  [Key: string]: AST[];
+  [Key: string]: EnvValue[];
 }
 
 interface Closure{
     type: ItemType.Clos;
     vars : Item[];
+    env : Env;
     body : AST;
 }
 
@@ -107,7 +113,7 @@ const tokenizer = buildLexer([
   [true, /^([^+\-*/a-zA-Z_0-9\[\]()'\s\t\r\n\\]+)/g, TokenKind.Other],
 ]);
 
-/**
+/*
  * ## BNF
 LISP = UNIT | LISPS | CON_STR
 LISPS = "(" LISP ")" | "'" "(" LISP ")"
@@ -166,7 +172,7 @@ function applyStr(value: Token<TokenKind.Str>): Item {
 }
 
 function applyBool(value: Token<TokenKind.Bool>): Item {
-    if (value.text == "true"){
+    if (value.text === "true"){
         return {
         type: ItemType.Bool,
         bool: true,
@@ -184,19 +190,19 @@ function applyList(value: AST[]): AST {
 }
 
 function applyQuoted(value: AST[]): AST {
-  let head: Item = { type: ItemType.Id, id: "quote" };
-  let merged = [head, value];
+  const head: Item = { type: ItemType.Id, id: "quote" };
+  const merged = [head, value];
   return merged;
 }
 
 function applyStrings(value: AST[]): AST {
-  let head: AST[] = [{ type: ItemType.Id, id: "%concat" }];
-  let merged = head.concat(value);
+  const head: AST[] = [{ type: ItemType.Id, id: "%concat" }];
+  const merged = head.concat(value);
   return merged;
 }
 
 /** for convinence to omit the spaces and newlines */
-let __ = opt(tok(TokenKind.SpaceNL));
+const __ = opt(tok(TokenKind.SpaceNL));
 
 LISP.setPattern(alt(kleft(SINGLE, __), kleft(LISPS, __), kleft(CON_STR, __)));
 
@@ -247,23 +253,23 @@ CON_STR.setPattern(
 
 function astToString(ast: AST): string {
   if (Array.isArray(ast)) {
-    let ast2 = ast.map(astToString);
+    const ast2 = ast.map(astToString);
     return "(" + ast2.join(" ") + ")";
   } else {
-    if (ast.type == ItemType.Str) {
+    if (ast.type === ItemType.Str) {
       return "`" + ast.str + "`";
-    } else if (ast.type == ItemType.Id) {
+    } else if (ast.type === ItemType.Id) {
       return ast.id;
-    } else if (ast.type == ItemType.Flo) {
+    } else if (ast.type === ItemType.Flo) {
       return ast.flo.toString();
-    } else if (ast.type == ItemType.Bool) {
+    } else if (ast.type === ItemType.Bool) {
         return ast.bool.toString();
-    }else if (ast.type == ItemType.Clos){
-        let binding = astToString(ast.vars);
-        let body = astToString(ast.body);
+    }else if (ast.type === ItemType.Clos){
+        const binding = astToString(ast.vars);
+        const body = astToString(ast.body);
         return `<closure; binding : ${binding}, body : ${body}>`;
-    }else if (ast.type == ItemType.Ls){
-      let body = astToString(ast.list);
+    }else if (ast.type === ItemType.Ls){
+      const body = astToString(ast.list);
       return "'"+body;
     }
      else {
@@ -276,35 +282,46 @@ function isItem(x: AST): x is Item {
   return !Array.isArray(x);
 }
 
-function interpBinary(op: Function, argsMapped: AST[], isBool? : boolean): ItemFlo | ItemInt | ItemBool {
-  let fst = argsMapped[0];
-  let snd = argsMapped[1];
-  if (argsMapped.length == 2 && isItem(fst) && isItem(snd)) {
-    if (fst.type == ItemType.Flo && snd.type == ItemType.Flo) {
-      if (isBool == true){
-        return {
-          type: ItemType.Bool,
-          bool: op(fst.flo, snd.flo),
-        };
-      }
+function interpBinary(op: (a : number, b : number) => number, argsMapped: AST[]):
+  ItemFlo | ItemInt  {
+  const fst = argsMapped[0];
+  const snd = argsMapped[1];
+  if (argsMapped.length === 2 && isItem(fst) && isItem(snd)) {
+    if (fst.type === ItemType.Flo && snd.type === ItemType.Flo) {
       return {
         type: ItemType.Flo,
         flo: op(fst.flo, snd.flo),
       };
-
-    } else if (fst.type == ItemType.Int && snd.type == ItemType.Int) {
-      if (isBool == true){
-        return {
-          type: ItemType.Bool,
-          bool: op(fst.int, snd.int),
-        };
-      }
+    } else if (fst.type === ItemType.Int && snd.type === ItemType.Int) {
       return {
         type: ItemType.Int,
         int: op(fst.int, snd.int),
       };
     } else {
-      throw new Error("the type of add should be (int, int) or (flo, flo");
+      throw new Error("the type of add should be (int, int) or (flo, flo)");
+    }
+  } else {
+    throw new Error("the number of args should be 2.");
+  }
+}
+
+function interpBinaryBool(op: (a : number, b : number) => boolean, argsMapped: AST[]):
+  ItemBool {
+  const fst = argsMapped[0];
+  const snd = argsMapped[1];
+  if (argsMapped.length === 2 && isItem(fst) && isItem(snd)) {
+    if (fst.type === ItemType.Flo && snd.type === ItemType.Flo) {
+      return {
+        type: ItemType.Bool,
+        bool: op(fst.flo, snd.flo),
+      };
+    } else if (fst.type === ItemType.Int && snd.type === ItemType.Int) {
+      return {
+        type: ItemType.Bool,
+        bool: op(fst.int, snd.int) as  boolean,
+      };
+    } else {
+      throw new Error("the type of add should be (int, int) or (flo, flo)");
     }
   } else {
     throw new Error("the number of args should be 2.");
@@ -330,7 +347,7 @@ function gt(x: number, y: number): boolean {
   return x > y;
 }
 function eq(x: number, y: number): boolean {
-  return x == y;
+  return x === y;
 }
 function le(x: number, y: number): boolean {
   return x <= y;
@@ -341,9 +358,9 @@ function ge(x: number, y: number): boolean {
 
 /** list manipulation */
 function car(x : List) : Item {
-  let fst = (<AST[]>x.list)[0];
+  const fst = (x.list as AST[])[0];
   if (Array.isArray(fst)){
-    let rtnList : List = {
+    const rtnList : List = {
       type: ItemType.Ls,
       list: fst,
   }
@@ -353,19 +370,20 @@ function car(x : List) : Item {
 }
 }
 
-function extendEnv(env : Env, vari : string, data : AST) : Env{
+function extendEnv(env : Env, vari : string, isRec: boolean, data : AST) : Env{
     // add var
     if (!(vari in env)){
-        env[vari] = [data];
+        env[vari] = [{isRec, value:data}];
+
     // update
     }else{
-        env[vari] = [data].concat(env[vari]);
+        env[vari] = [{isRec, value:data}].concat(env[vari]);
     }
     return env;
 }
-var emptyEnv: Env = {};
+const emptyEnv: Env = {};
 
-/** 
+/**
  * @throws {Error}
  */
 function invalidLengthException( id : string, no : number) : Error{
@@ -376,15 +394,23 @@ function isItemArray(x: any): x is Item[] {
     return x[0].hasOwnProperty('type');
   }
 
+function isItemId(x: any): x is ItemId {
+    return x.hasOwnProperty('type') && x.hasOwnProperty('id');
+  }
+
+function isClosure(x: any): x is Closure {
+    return x.hasOwnProperty('type') && x.hasOwnProperty('vars');
+}
+
+
 function interp(prog: AST, env: Env): AST {
-  console.log(astToString(prog));
   if (Array.isArray(prog)) {
     if (!Array.isArray(prog[0])) {
-      let op = prog[0];
-      if (op.type == ItemType.Id) {
+      const op = prog[0];
+      if (op.type === ItemType.Id) {
         // a list
-        if (op.id == "quote"){
-          let body = prog[1];
+        if (op.id === "quote"){
+          const body = prog[1];
           if (!Array.isArray(body)){
             throw new Error("the argument of quote, aka: "+body+", is not a list.");
           }else{
@@ -394,9 +420,10 @@ function interp(prog: AST, env: Env): AST {
         }
       }
         }
-        else if (op.id == "lambda"){
-            let vars = prog[1];
-            if (prog.length != 3){
+        /* lambda */
+        else if (op.id === "lambda"){
+            const vars = prog[1];
+            if (prog.length !== 3){
                 throw invalidLengthException('lambda', 2);
             }
             else if (!isItemArray(vars)){
@@ -405,51 +432,64 @@ function interp(prog: AST, env: Env): AST {
             else{
                 return {
                     type: ItemType.Clos,
-                    vars: vars,
+                    env,
+                    vars,
                     body: prog[2],
                 }
             }
         }
-        else if (op.id == "let"){
-            let bindings = prog[1];
-            if (prog.length != 3){
+        /** let function */
+        else if (op.id === "let" || op.id === "letrec"){
+            const bindings = prog[1];
+            if (prog.length !== 3){
+              if (op.id === "let"){
                 throw invalidLengthException('let', 2);
+              }else{
+                throw invalidLengthException('letrec', 2);
+              }
             }
             else if (!Array.isArray(bindings)){
                 throw new Error("the bindings should be array");
             }else{
 
-                var newEnv = env;
-                for (var i=0;i<bindings.length;i++){
-                   
-                    let binding = bindings[i];
+                let newEnv = structuredClone(env);
+                for (let i=0;i<bindings.length;i++){
+                    const binding = bindings[i];
                     if (!Array.isArray(binding)
-                        || (<AST[]>(binding)).length != 2){
+                        || (binding as AST[]).length !== 2){
+                      if (op.id === "let"){
                         throw new Error("malformed of let.")
+                      }else{
+                        throw new Error("malformed of letrec.")
+                      }
                     }else{
-                        let vari = binding[0];
+                        const vari = binding[0];
                         if (vari.hasOwnProperty("id")){
-                            let variName = (<ItemId>vari).id;
-                            newEnv = extendEnv(newEnv, variName , interp(binding[1], env));
-                            
+                            const variName = (vari as ItemId).id;
+                            const data = interp(binding[1], env);
+                            if (op.id === "letrec"){
+                              newEnv = extendEnv(newEnv, variName , true, data);
+                            }else{
+                              newEnv = extendEnv(newEnv, variName , false, data);
+                            }
                         }
-
                     }
                 }
-                let body = prog[2];
+                const body = prog[2];
                 return interp(body, newEnv);
             }
         }
-        else if(op.id == "if"){
-            if (prog.length != 4){
+        // end of let
+        else if(op.id === "if"){
+            if (prog.length !== 4){
                 throw invalidLengthException('if', 3);
             }else{
-                let cond = interp(prog[1], env);
+              const cond = interp(prog[1], env);
                 if (Array.isArray(cond)){
                     throw new Error("cond can't be reduced to a constant");
-                }else if (cond.type != ItemType.Bool){
+                }else if (cond.type !== ItemType.Bool){
                     throw new Error("type error of cond, not a bool");
-                }else if (cond.bool == true){
+                }else if (cond.bool === true){
                     return interp(prog[2], env);
                 // if cond is false
                 }else{
@@ -459,56 +499,74 @@ function interp(prog: AST, env: Env): AST {
         }
         else{
 
-        let argsMapped = prog.slice(1).map((x) => {
+        const argsMapped = prog.slice(1).map((x) => {
           return interp(x, env);
         });
         // binary basic operator
-        if (op.id == "+") {
+        if (op.id === "+") {
           return interpBinary(add, argsMapped);
-        } else if (op.id == "-") {
+        } else if (op.id === "-") {
           return interpBinary(sub, argsMapped);
-        } else if (op.id == "*") {
+        } else if (op.id === "*") {
           return interpBinary(mul, argsMapped);
-        } else if (op.id == "/") {
+        } else if (op.id === "/") {
           return interpBinary(div, argsMapped);
         // bool calculation
-        } else if (op.id == ">") {
-          return interpBinary(gt, argsMapped,true);
-        } else if (op.id == "<") {
-          return interpBinary(lt, argsMapped,true);
-        } else if (op.id == ">=") {
-          return interpBinary(ge, argsMapped,true);
-        } else if (op.id == "<=") {
-          return interpBinary(le, argsMapped,true);
-        } else if (op.id == "==") {
-          return interpBinary(eq, argsMapped,true);
-        } else if (op.id == "car") {
-          let arg = argsMapped[0];
-          if (prog.length != 2){
+        } else if (op.id === ">") {
+          return interpBinaryBool(gt, argsMapped);
+        } else if (op.id === "<") {
+          return interpBinaryBool(lt, argsMapped);
+        } else if (op.id === ">=") {
+          return interpBinaryBool(ge, argsMapped);
+        } else if (op.id === "<=") {
+          return interpBinaryBool(le, argsMapped);
+        } else if (op.id === "==") {
+          return interpBinaryBool(eq, argsMapped);
+        } else if (op.id === "car") {
+          const arg = argsMapped[0];
+          if (prog.length !== 2){
             throw invalidLengthException('car', 1);
-          }else if (!arg.hasOwnProperty('type') || (<Item>arg).type != ItemType.Ls){
+          }else if (!arg.hasOwnProperty('type') || (arg as Item).type !== ItemType.Ls){
             throw new Error("the arg of 'car' is not a list.")
           }else{
-            return car((<List>arg));
+            return car((arg as List));
           }
         // other named function call
         } else {
-          let caller = interp(prog[0],env);
 
-          let varArgs = (<ItemId[]>(<Closure>caller).vars);
-          let varArgLen = varArgs.length;
-          let argsMappedLen = argsMapped.length;
-          if (argsMappedLen != varArgLen){
+          const caller = interp(prog[0],env);
+
+
+          const varArgs = ((caller as Closure).vars as ItemId[]);
+          const varArgLen = varArgs.length;
+          const argsMappedLen = argsMapped.length;
+          if (argsMappedLen !== varArgLen){
             throw new Error("the number of the arguments is"
             +" not the same of that of the input vars.");
           }else{
-            var newEnv = env;
-            var fuBody = (<Closure>caller).body;
-            for(var i=0;i<argsMapped.length;i++){
-              newEnv = extendEnv(env, varArgs[i].id, argsMapped[i]);
+            let newEnv = structuredClone((caller as Closure).env);
+
+
+            // for recursion function usage
+            for(let i=0;i<Object.keys(env).length;i++){
+              const currentKey = Object.keys(env)[i];
+              const currentValue = env[currentKey];
+              if (currentValue[0].isRec !== undefined && currentValue[0].isRec === true){
+                newEnv = extendEnv(newEnv, currentKey, true, currentValue[0].value);
+              }
             }
+            const fuBody = (caller as Closure).body;
+
+            for(let i=0;i<argsMapped.length;i++){
+              const varArg = varArgs[i];
+              let varArgIsRec  = false;
+              if (varArg.isRec !== undefined && varArg.isRec === true){
+                varArgIsRec = true;
+              }
+              newEnv = extendEnv(newEnv, varArgs[i].id, varArgIsRec, argsMapped[i]);
+            }
+
             return interp(fuBody, newEnv);
-            
           }
 
         }}
@@ -518,32 +576,62 @@ function interp(prog: AST, env: Env): AST {
       }
     // the caller which is a higher-function call
     } else {
-      throw new Error("todo for ((lambda arg ) arg)");
+      const argsMapped = prog.slice(1).map((x) => {
+        return interp(x, env);
+      });
+      const caller = interp(prog[0], env);
+
+      const varArgs = (caller as Closure).vars as ItemId[];
+      const varArgLen = varArgs.length;
+      const argsMappedLen = argsMapped.length;
+      if (argsMappedLen !== varArgLen){
+        throw new Error("the number of the arguments is"
+        +" not the same of that of the input vars.");
+      }
+
+
+      else{
+
+        const fuBody = (caller as Closure).body;
+        let newEnv = structuredClone(env);
+
+        // for recursion function usage
+        for(let i=0;i<argsMapped.length;i++){
+          let varArgIsRec = false;
+          if (varArgs[i].isRec !== undefined && varArgs[i].isRec === true){
+            varArgIsRec = true;
+          }
+          newEnv = extendEnv(newEnv, varArgs[i].id,varArgIsRec, argsMapped[i]);
+        }
+
+        return interp(fuBody, newEnv);
+      }
     }
   } else {
     // constant
-    if (prog.type != ItemType.Id) {
+    if (prog.type !== ItemType.Id) {
       return prog;
-    // variable
-    } else {
-      let varName = prog.id;
-      let value = env[varName][0];
-      return value;
+    }
+    // other variable
+    else{
+      const varName = prog.id;
+      const isRecAndVal = env[varName][0];
+      return isRecAndVal.value;
     }
   }
 }
 
 function evaluate(expr: string): string {
-  let input = expectSingleResult(expectEOF(LISP.parse(tokenizer.parse(expr))));
-  let interped = interp(input, emptyEnv);
+  const input = expectSingleResult(expectEOF(LISP.parse(tokenizer.parse(expr))));
+  const interped = interp(input, emptyEnv);
   return astToString(interped);
 }
 
-//evaluate(`(main '((text 12)) [ 快狐跳懶狗\\\\\\\[\\\]\\\(\\\)(italic "fox and dog") (bold [OK])])`)
-//evaluate("@(let (a 17) (+ a 10))@")
+// evaluate(`(main '((text 12)) [ 快狐跳懶狗\\\\\\\[\\\]\\\(\\\)(italic "fox and dog") (bold [OK])])`)
+// evaluate("@(let (a 17) (+ a 10))@")
 
 // eval print loop
-const readline = require("node:readline");
+import readline = require("node:readline");
 
 const rl = readline.createInterface({
   input: process.stdin,
