@@ -548,8 +548,8 @@ function interp(prog: AST, env: Env): AST {
 
 
             // for recursion function usage
-            for(let i=0;i<Object.keys(env).length;i++){
-              const currentKey = Object.keys(env)[i];
+            for(const key in env){
+              const currentKey = key;
               const currentValue = env[currentKey];
               if (currentValue[0].isRec !== undefined && currentValue[0].isRec === true){
                 newEnv = extendEnv(newEnv, currentKey, true, currentValue[0].value);
