@@ -101,7 +101,7 @@ const tokenizer = buildLexer([
   [true, /^\d+\.\d+/g, TokenKind.Flo],
   [true, /^true/g, TokenKind.Bool],
   [true, /^false/g, TokenKind.Bool],
-  [true, /^([+\-*/a-zA-Z_][0-9+\-*/a-zA-Z_]*|[<>]=?|==)/g, TokenKind.Id],
+  [true, /^([+\-*/a-zA-Z_][0-9+\-*/a-zA-Z_]*|[<>]=?|!?=)/g, TokenKind.Id],
   [true, /^\"([^\"]|\\\")+\"/g, TokenKind.Str],
   [true, /^[(]/g, TokenKind.LParen],
   [true, /^[)]/g, TokenKind.RParen],
@@ -251,9 +251,9 @@ CON_STR.setPattern(
   apply(kmid(str("["), rep_sc(CON_STR_INNER), str("]")), applyStrings)
 );
 
-function astToString(ast: AST): string {
+function astToString(ast: AST, isInQuoted? : boolean): string {
   if (Array.isArray(ast)) {
-    const ast2 = ast.map(astToString);
+    const ast2 = ast.map((x)=>astToString(x, isInQuoted));
     return "(" + ast2.join(" ") + ")";
   } else {
     if (ast.type === ItemType.Str) {
@@ -269,8 +269,12 @@ function astToString(ast: AST): string {
         const body = astToString(ast.body);
         return `<closure; binding : ${binding}, body : ${body}>`;
     }else if (ast.type === ItemType.Ls){
-      const body = astToString(ast.list);
-      return "'"+body;
+      const body = astToString(ast.list, true);
+      if (isInQuoted){
+        return body;
+      }else{
+        return "'"+body;
+      }
     }
      else {
       return ast.int.toString();
@@ -301,7 +305,7 @@ function interpBinary(op: (a : number, b : number) => number, argsMapped: AST[])
       throw new Error("the type of add should be (int, int) or (flo, flo)");
     }
   } else {
-    throw new Error("the number of args should be 2.");
+    throw new Error(`the number of args of ${op} should be 2, but it's ${argsMapped}`);
   }
 }
 
@@ -352,9 +356,20 @@ function eq(x: number, y: number): boolean {
 function le(x: number, y: number): boolean {
   return x <= y;
 }
+function ne(x: number, y: number): boolean {
+  return x !== y;
+}
 function ge(x: number, y: number): boolean {
   return x >= y;
 }
+function concatString(l: ItemStr, r : ItemStr) : ItemStr {
+  const rtn : ItemStr = {
+      type: ItemType.Str,
+      str: l.str + r.str,
+  }
+    return rtn;
+}
+
 
 /** list manipulation */
 function car(x : List) : Item {
@@ -365,10 +380,30 @@ function car(x : List) : Item {
       list: fst,
   }
   return rtnList;
-}else{
-  return fst;
+  }else{
+    return fst;
+  }
 }
+function cdr(x : List) : Item {
+  if (x.list.length == 0){
+    throw new Error("the argument of 'cdr' can't be a empty list.")
+  }
+  const remained = (x.list as AST[]).slice(1);
+  const rtnList : List = {
+      type: ItemType.Ls,
+      list: remained,
+  }
+    return rtnList;
 }
+function cons(h: AST, t : List) : List {
+  const inner = [h].concat(t.list);
+  const rtnList : List = {
+      type: ItemType.Ls,
+      list: inner,
+  }
+    return rtnList;
+}
+
 
 function extendEnv(env : Env, vari : string, isRec: boolean, data : AST) : Env{
     // add var
@@ -520,8 +555,10 @@ function interp(prog: AST, env: Env): AST {
           return interpBinaryBool(ge, argsMapped);
         } else if (op.id === "<=") {
           return interpBinaryBool(le, argsMapped);
-        } else if (op.id === "==") {
+        } else if (op.id === "=") {
           return interpBinaryBool(eq, argsMapped);
+        }  else if (op.id === "!=") {
+            return interpBinaryBool(ne, argsMapped);
         } else if (op.id === "car") {
           const arg = argsMapped[0];
           if (prog.length !== 2){
@@ -531,8 +568,41 @@ function interp(prog: AST, env: Env): AST {
           }else{
             return car((arg as List));
           }
+        }
+        else if (op.id === "cdr") {
+          const arg = argsMapped[0];
+          if (prog.length !== 2){
+            throw invalidLengthException('cdr', 1);
+          }else if (!arg.hasOwnProperty('type') || (arg as Item).type !== ItemType.Ls){
+            throw new Error("the arg of 'cdr' is not a list.")
+          }else{
+            return cdr((arg as List));
+          }
+        }else if (op.id === "cons") {
+          const arg = argsMapped;
+          if (prog.length !== 3){
+            throw invalidLengthException('cdr', 2);
+          }else if (!arg[1].hasOwnProperty('type') || (arg[1] as Item).type !== ItemType.Ls){
+            throw new Error("the 2nd arg of 'cons' is not a list.")
+          }else{
+            return cons(arg[0], (arg[1] as List));
+          }
+        }        // string manipulations
+        else if (op.id === "++") {
+        const lhs = prog[1];
+        const rhs = prog[2];
+        if (prog.length !== 3){
+          throw invalidLengthException('++', 2);
+        }else if (!isItem(lhs) || !isItem(rhs)
+        || lhs.type != ItemType.Str || rhs.type != ItemType.Str){
+          throw new Error("at least one of the arg. of '++' is not a str.")
+        }else{
+          return concatString(lhs, rhs);
+        }}
+
+        
         // other named function call
-        } else {
+        else {
 
           const caller = interp(prog[0],env);
 
@@ -548,13 +618,13 @@ function interp(prog: AST, env: Env): AST {
 
 
             // for recursion function usage
-            for(const key in env){
+            /*for(const key in env){
               const currentKey = key;
               const currentValue = env[currentKey];
               if (currentValue[0].isRec !== undefined && currentValue[0].isRec === true){
                 newEnv = extendEnv(newEnv, currentKey, true, currentValue[0].value);
               }
-            }
+            }*/
             const fuBody = (caller as Closure).body;
 
             for(let i=0;i<argsMapped.length;i++){
@@ -616,6 +686,21 @@ function interp(prog: AST, env: Env): AST {
     else{
       const varName = prog.id;
       const isRecAndVal = env[varName][0];
+
+      // for letrec's usage
+      if (isRecAndVal.isRec === true){
+        let value = isRecAndVal.value;
+        if (isClosure(value)){
+          for (const key in env){
+            const valueOfKey = env[key][0];
+            if (valueOfKey.isRec == true){
+              value.env = extendEnv(value.env, key, true, valueOfKey.value);
+            }
+          }
+          
+          return value;
+        }
+      }
       return isRecAndVal.value;
     }
   }
