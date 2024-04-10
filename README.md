@@ -5,7 +5,12 @@
  - [v] car - 240403
  - [v] cdr and cons
  - [v] concat string (++)
- - [ ] create pdf
+ - [v] set!
+ - [v] list ref by index
+ - [ ] dict ref by id
+ - [v] map 20240410
+ - [v] add pdf page 240410 (addPDFPages)
+ - [v] create pdf 240410
  - [ ] close pdf
  - [ ] add character
  - [ ] add path

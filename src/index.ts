@@ -1,4 +1,5 @@
-import { validateHeaderName } from "http";
+import * as fs from 'fs';
+import { PDFDocument } from 'pdf-lib'
 import { Token } from "typescript-parsec";
 import {
   buildLexer,
@@ -18,6 +19,12 @@ import {
   tok,
   opt,
 } from "typescript-parsec";
+
+
+
+/** input lisp file */
+const filename = "./text.lisp";
+let pdfDoc :  PDFDocument;
 
 enum TokenKind {
   Id,
@@ -43,13 +50,19 @@ enum ItemType {
   Bool,
   Clos,
   Ls,
+  Unit,
 }
 
-type Item = ItemStr | ItemInt | ItemId | ItemFlo | ItemBool | Closure | List;
+type Item = ItemStr | ItemInt | ItemId | ItemFlo | ItemBool | ItemUnit | Closure | List;
 
 interface ItemStr {
   type: ItemType.Str;
   str: string;
+}
+
+// returned type for input or print, etc. #unit for representation
+interface ItemUnit {
+  type: ItemType.Unit;
 }
 
 interface ItemInt {
@@ -97,11 +110,11 @@ interface Closure{
 type AST = Item | AST[];
 
 const tokenizer = buildLexer([
-  [true, /^\d+/g, TokenKind.Int],
-  [true, /^\d+\.\d+/g, TokenKind.Flo],
+  [true, /^-?\d+/g, TokenKind.Int],
+  [true, /^-?\d+\.\d+/g, TokenKind.Flo],
   [true, /^true/g, TokenKind.Bool],
   [true, /^false/g, TokenKind.Bool],
-  [true, /^([+\-*/a-zA-Z_][0-9+\-*/a-zA-Z_]*|[<>]=?|!?=)/g, TokenKind.Id],
+  [true, /^([+\-*/a-zA-Z_][0-9+\-*/a-zA-Z_]*!?|[<>]=?|!?=)/g, TokenKind.Id],
   [true, /^\"([^\"]|\\\")+\"/g, TokenKind.Str],
   [true, /^[(]/g, TokenKind.LParen],
   [true, /^[)]/g, TokenKind.RParen],
@@ -264,6 +277,8 @@ function astToString(ast: AST, isInQuoted? : boolean): string {
       return ast.flo.toString();
     } else if (ast.type === ItemType.Bool) {
         return ast.bool.toString();
+    }else if (ast.type === ItemType.Unit) {
+      return "#unit"; // mark for unit
     }else if (ast.type === ItemType.Clos){
         const binding = astToString(ast.vars);
         const body = astToString(ast.body);
@@ -302,7 +317,8 @@ function interpBinary(op: (a : number, b : number) => number, argsMapped: AST[])
         int: op(fst.int, snd.int),
       };
     } else {
-      throw new Error("the type of add should be (int, int) or (flo, flo)");
+
+      throw new Error(`the type of ${op.toString()} should be (int, int) or (flo, flo)`);
     }
   } else {
     throw new Error(`the number of args of ${op} should be 2, but it's ${argsMapped}`);
@@ -325,7 +341,7 @@ function interpBinaryBool(op: (a : number, b : number) => boolean, argsMapped: A
         bool: op(fst.int, snd.int) as  boolean,
       };
     } else {
-      throw new Error("the type of add should be (int, int) or (flo, flo)");
+      throw new Error(`the type of ${op.toString()} should be (int, int) or (flo, flo)`);
     }
   } else {
     throw new Error("the number of args should be 2.");
@@ -362,12 +378,57 @@ function ne(x: number, y: number): boolean {
 function ge(x: number, y: number): boolean {
   return x >= y;
 }
+
+function otherNe(x: any, y: any): boolean {
+  return astToString(x) !== astToString(y);
+}
+function otherEq(x: any, y: any): boolean {
+  return astToString(x) === astToString(y);
+}
+
+
+// string manipulations
 function concatString(l: ItemStr, r : ItemStr) : ItemStr {
   const rtn : ItemStr = {
       type: ItemType.Str,
       str: l.str + r.str,
   }
     return rtn;
+}
+/**
+ * get string `s`'s substring from ith-char to (j-1)th-char.
+ * @param s the string
+ * @param i beginning index
+ * @param j ending index (excluded)
+ * @returns the substring
+ */
+function subString(s: ItemStr, i: ItemInt, j? : ItemInt): ItemStr {
+  const realI = i.int;
+  const realStr = s.str;
+  if (realI >= realStr.length || realI < 0){
+    throw new Error("the 2nd argument of `listRef` should between 0..(length of string `s` - 1)");
+  }
+  else if(j === undefined){
+    const rtn : ItemStr = {
+      type:ItemType.Str,
+      str:realStr.substring(realI)
+    };
+    return rtn;
+  }
+  else{
+
+  const realJ = j.int;
+  if (realJ >= realStr.length || realJ < 0){
+    throw new Error("the 3rd argument of `listRef` should between 0..(length of string `s` - 1)");
+  }else if (realI > realJ){
+    throw new Error("the 2nd argument should not larger than the 3rd arg.");
+  }else{
+    const rtn : ItemStr = {
+      type:ItemType.Str,
+      str:realStr.substring(realI,realJ),
+    };
+    return rtn;
+  }}
 }
 
 
@@ -404,6 +465,17 @@ function cons(h: AST, t : List) : List {
     return rtnList;
 }
 
+function listRef(l: List, i: ItemInt): AST {
+  const realI = i.int;
+  if (realI >= l.list.length || realI < 0){
+    throw new Error("the argument of `listRef` should between 0..(length of l - 1)");
+  }else{
+    const rtn = l.list[realI];
+    return rtn;
+  }
+}
+
+
 
 function extendEnv(env : Env, vari : string, isRec: boolean, data : AST) : Env{
     // add var
@@ -436,7 +508,6 @@ function isItemId(x: any): x is ItemId {
 function isClosure(x: any): x is Closure {
     return x.hasOwnProperty('type') && x.hasOwnProperty('vars');
 }
-
 
 function interp(prog: AST, env: Env): AST {
   if (Array.isArray(prog)) {
@@ -556,9 +627,42 @@ function interp(prog: AST, env: Env): AST {
         } else if (op.id === "<=") {
           return interpBinaryBool(le, argsMapped);
         } else if (op.id === "=") {
-          return interpBinaryBool(eq, argsMapped);
+          if ((argsMapped[1] as Item).type === ItemType.Flo ||
+          (argsMapped[1] as Item).type === ItemType.Int){
+            return interpBinaryBool(eq, argsMapped);
+          }else{
+            if (prog.length !== 3){
+              throw invalidLengthException('=', 2);
+            }else if(!isItem(argsMapped[0])
+              ||!isItem(argsMapped[1])){
+              throw new Error("Either 1st or 2nd arg of '=' is not a item.")
+            }else{
+              return {
+                type:ItemType.Bool,
+                bool:otherEq(argsMapped[0], argsMapped[1]),
+              };
+            }
+          }
         }  else if (op.id === "!=") {
+          if (
+            ((argsMapped[0] as Item).type === ItemType.Flo &&
+            (argsMapped[0] as Item).type ===  (argsMapped[1] as Item).type)||
+          ((argsMapped[0] as Item).type === ItemType.Int) &&
+          ((argsMapped[0] as Item).type === (argsMapped[1] as Item).type)){
             return interpBinaryBool(ne, argsMapped);
+          }else{
+            if (prog.length !== 3){
+              throw invalidLengthException('!=', 2);
+            }else if(!isItem(argsMapped[1])
+              ||!isItem(argsMapped[2])){
+              throw new Error("Either 1st or 2nd arg of '!=' is not a item.")
+            }else{
+              return {
+                type:ItemType.Bool,
+                bool:otherNe(argsMapped[0], argsMapped[1]),
+              };
+            }
+          }
         } else if (op.id === "car") {
           const arg = argsMapped[0];
           if (prog.length !== 2){
@@ -587,7 +691,23 @@ function interp(prog: AST, env: Env): AST {
           }else{
             return cons(arg[0], (arg[1] as List));
           }
-        }        // string manipulations
+        }
+        else if (op.id === "listRef"){
+          const arg = argsMapped;
+          if (prog.length !== 3){
+            throw invalidLengthException('listRef', 2);
+          }else if (!arg[0].hasOwnProperty('type') || (arg[0] as Item).type !== ItemType.Ls){
+            throw new Error("the 1st arg of 'listRef' is not a list.")
+          }else if (!arg[1].hasOwnProperty('type') || (arg[1] as Item).type !== ItemType.Int){
+            throw new Error("the 2nd arg of 'listRef' is not a number.")
+          }else{
+            return listRef(arg[0] as List, arg[1] as ItemInt);
+          }          
+        }
+
+
+        
+        // string manipulations
         else if (op.id === "++") {
         const lhs = prog[1];
         const rhs = prog[2];
@@ -599,7 +719,57 @@ function interp(prog: AST, env: Env): AST {
         }else{
           return concatString(lhs, rhs);
         }}
+        else if (op.id === "subString") {
+        const str = prog[1];
+        const i = prog[2];
+        if (prog.length !== 3 && prog.length !== 4){
+          throw new Error(`the number of args for 'subString' should be 2 or 3.`);
+        }else if (!isItem(str) ||  str.type != ItemType.Str ){
+          throw new Error("the 1st item of the arg for 'subString' should be a string.")
+        }else{
+          if (prog.length == 3){
+            // str.substring(i)
+            return subString(str, i as ItemInt);}
+          else{
+            // str.substring(i,j)
+            return subString(str, i as ItemInt, prog[3] as ItemInt);}
+          }
+        }
 
+        // set manipulations
+        else if (op.id === "set!") {
+          const vari : ItemId = prog[1] as ItemId;
+          const replacer = prog[2];
+          if (prog.length !== 3){
+            throw invalidLengthException('set!', 2);
+          }else if (!isItem(vari) || !isItem(replacer)
+          || (env[vari.id][0].value as Item).type !=  replacer.type ){
+            throw new Error("the type of replace and variable should be the same.")
+          }else{
+            env[vari.id][0].value = prog[2];
+            return {type:ItemType.Unit};
+          }
+        }
+        else if (op.id === "addPDFPage"){
+          if (prog.length !== 2){
+            throw invalidLengthException('addPDFPage', 1);
+          }else if(astToString(argsMapped[0]) !== "'()"){
+            throw new Error("the arg of addPdfPage should be a empty string '()")
+          }else{
+            const page = pdfDoc.addPage();
+            return {
+              type:ItemType.Unit,
+            }
+          }
+
+            const rtn = argsMapped[argsMapped.length-1];
+            return rtn;
+        }
+        // procedures returning the last called command
+        else if (op.id === "begin"){
+          const rtn = argsMapped[argsMapped.length-1];
+          return rtn;
+      }
         
         // other named function call
         else {
@@ -611,7 +781,7 @@ function interp(prog: AST, env: Env): AST {
           const varArgLen = varArgs.length;
           const argsMappedLen = argsMapped.length;
           if (argsMappedLen !== varArgLen){
-            throw new Error("the number of the arguments is"
+            throw new Error("the number of the arguments of the caller is"
             +" not the same of that of the input vars.");
           }else{
             let newEnv = structuredClone((caller as Closure).env);
@@ -717,13 +887,25 @@ function evaluate(expr: string): string {
 
 // eval print loop
 import readline = require("node:readline");
+import { exit } from "node:process";
 
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
 });
 
-rl.question(`What's your program?`, (prog: string) => {
+
+async function run(){
+  pdfDoc = await PDFDocument.create();
+
+
+  const prog = fs.readFileSync(filename, { encoding: 'utf8' });
+
   console.log(evaluate(prog));
-  rl.close();
-});
+
+  const pdfBytes = await pdfDoc.save();
+  fs.writeFileSync(filename+'.pdf', pdfBytes, 'binary');
+  exit(0);
+}
+
+run();

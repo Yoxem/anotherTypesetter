@@ -1,7 +1,31 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 Object.defineProperty(exports, "__esModule", { value: true });
+const fs = __importStar(require("fs"));
+const pdf_lib_1 = require("pdf-lib");
 const typescript_parsec_1 = require("typescript-parsec");
 const typescript_parsec_2 = require("typescript-parsec");
+/** input lisp file */
+const filename = "./text.lisp";
+let pdfDoc;
 var TokenKind;
 (function (TokenKind) {
     TokenKind[TokenKind["Id"] = 0] = "Id";
@@ -27,13 +51,14 @@ var ItemType;
     ItemType[ItemType["Bool"] = 4] = "Bool";
     ItemType[ItemType["Clos"] = 5] = "Clos";
     ItemType[ItemType["Ls"] = 6] = "Ls";
+    ItemType[ItemType["Unit"] = 7] = "Unit";
 })(ItemType || (ItemType = {}));
 const tokenizer = (0, typescript_parsec_1.buildLexer)([
-    [true, /^\d+/g, TokenKind.Int],
-    [true, /^\d+\.\d+/g, TokenKind.Flo],
+    [true, /^-?\d+/g, TokenKind.Int],
+    [true, /^-?\d+\.\d+/g, TokenKind.Flo],
     [true, /^true/g, TokenKind.Bool],
     [true, /^false/g, TokenKind.Bool],
-    [true, /^([+\-*/a-zA-Z_][0-9+\-*/a-zA-Z_]*|[<>]=?|!?=)/g, TokenKind.Id],
+    [true, /^([+\-*/a-zA-Z_][0-9+\-*/a-zA-Z_]*!?|[<>]=?|!?=)/g, TokenKind.Id],
     [true, /^\"([^\"]|\\\")+\"/g, TokenKind.Str],
     [true, /^[(]/g, TokenKind.LParen],
     [true, /^[)]/g, TokenKind.RParen],
@@ -146,6 +171,9 @@ function astToString(ast, isInQuoted) {
         else if (ast.type === ItemType.Bool) {
             return ast.bool.toString();
         }
+        else if (ast.type === ItemType.Unit) {
+            return "#unit"; // mark for unit
+        }
         else if (ast.type === ItemType.Clos) {
             const binding = astToString(ast.vars);
             const body = astToString(ast.body);
@@ -185,7 +213,7 @@ function interpBinary(op, argsMapped) {
             };
         }
         else {
-            throw new Error("the type of add should be (int, int) or (flo, flo)");
+            throw new Error(`the type of ${op.toString()} should be (int, int) or (flo, flo)`);
         }
     }
     else {
@@ -209,7 +237,7 @@ function interpBinaryBool(op, argsMapped) {
             };
         }
         else {
-            throw new Error("the type of add should be (int, int) or (flo, flo)");
+            throw new Error(`the type of ${op.toString()} should be (int, int) or (flo, flo)`);
         }
     }
     else {
@@ -246,12 +274,56 @@ function ne(x, y) {
 function ge(x, y) {
     return x >= y;
 }
+function otherNe(x, y) {
+    return astToString(x) !== astToString(y);
+}
+function otherEq(x, y) {
+    return astToString(x) === astToString(y);
+}
+// string manipulations
 function concatString(l, r) {
     const rtn = {
         type: ItemType.Str,
         str: l.str + r.str,
     };
     return rtn;
+}
+/**
+ * get string `s`'s substring from ith-char to (j-1)th-char.
+ * @param s the string
+ * @param i beginning index
+ * @param j ending index (excluded)
+ * @returns the substring
+ */
+function subString(s, i, j) {
+    const realI = i.int;
+    const realStr = s.str;
+    if (realI >= realStr.length || realI < 0) {
+        throw new Error("the 2nd argument of `listRef` should between 0..(length of string `s` - 1)");
+    }
+    else if (j === undefined) {
+        const rtn = {
+            type: ItemType.Str,
+            str: realStr.substring(realI)
+        };
+        return rtn;
+    }
+    else {
+        const realJ = j.int;
+        if (realJ >= realStr.length || realJ < 0) {
+            throw new Error("the 3rd argument of `listRef` should between 0..(length of string `s` - 1)");
+        }
+        else if (realI > realJ) {
+            throw new Error("the 2nd argument should not larger than the 3rd arg.");
+        }
+        else {
+            const rtn = {
+                type: ItemType.Str,
+                str: realStr.substring(realI, realJ),
+            };
+            return rtn;
+        }
+    }
 }
 /** list manipulation */
 function car(x) {
@@ -285,6 +357,16 @@ function cons(h, t) {
         list: inner,
     };
     return rtnList;
+}
+function listRef(l, i) {
+    const realI = i.int;
+    if (realI >= l.list.length || realI < 0) {
+        throw new Error("the argument of `listRef` should between 0..(length of l - 1)");
+    }
+    else {
+        const rtn = l.list[realI];
+        return rtn;
+    }
 }
 function extendEnv(env, vari, isRec, data) {
     // add var
@@ -447,10 +529,48 @@ function interp(prog, env) {
                         return interpBinaryBool(le, argsMapped);
                     }
                     else if (op.id === "=") {
-                        return interpBinaryBool(eq, argsMapped);
+                        if (argsMapped[1].type === ItemType.Flo ||
+                            argsMapped[1].type === ItemType.Int) {
+                            return interpBinaryBool(eq, argsMapped);
+                        }
+                        else {
+                            if (prog.length !== 3) {
+                                throw invalidLengthException('=', 2);
+                            }
+                            else if (!isItem(argsMapped[0])
+                                || !isItem(argsMapped[1])) {
+                                throw new Error("Either 1st or 2nd arg of '=' is not a item.");
+                            }
+                            else {
+                                return {
+                                    type: ItemType.Bool,
+                                    bool: otherEq(argsMapped[0], argsMapped[1]),
+                                };
+                            }
+                        }
                     }
                     else if (op.id === "!=") {
-                        return interpBinaryBool(ne, argsMapped);
+                        if ((argsMapped[0].type === ItemType.Flo &&
+                            argsMapped[0].type === argsMapped[1].type) ||
+                            (argsMapped[0].type === ItemType.Int) &&
+                                (argsMapped[0].type === argsMapped[1].type)) {
+                            return interpBinaryBool(ne, argsMapped);
+                        }
+                        else {
+                            if (prog.length !== 3) {
+                                throw invalidLengthException('!=', 2);
+                            }
+                            else if (!isItem(argsMapped[1])
+                                || !isItem(argsMapped[2])) {
+                                throw new Error("Either 1st or 2nd arg of '!=' is not a item.");
+                            }
+                            else {
+                                return {
+                                    type: ItemType.Bool,
+                                    bool: otherNe(argsMapped[0], argsMapped[1]),
+                                };
+                            }
+                        }
                     }
                     else if (op.id === "car") {
                         const arg = argsMapped[0];
@@ -487,7 +607,23 @@ function interp(prog, env) {
                         else {
                             return cons(arg[0], arg[1]);
                         }
-                    } // string manipulations
+                    }
+                    else if (op.id === "listRef") {
+                        const arg = argsMapped;
+                        if (prog.length !== 3) {
+                            throw invalidLengthException('listRef', 2);
+                        }
+                        else if (!arg[0].hasOwnProperty('type') || arg[0].type !== ItemType.Ls) {
+                            throw new Error("the 1st arg of 'listRef' is not a list.");
+                        }
+                        else if (!arg[1].hasOwnProperty('type') || arg[1].type !== ItemType.Int) {
+                            throw new Error("the 2nd arg of 'listRef' is not a number.");
+                        }
+                        else {
+                            return listRef(arg[0], arg[1]);
+                        }
+                    }
+                    // string manipulations
                     else if (op.id === "++") {
                         const lhs = prog[1];
                         const rhs = prog[2];
@@ -502,6 +638,63 @@ function interp(prog, env) {
                             return concatString(lhs, rhs);
                         }
                     }
+                    else if (op.id === "subString") {
+                        const str = prog[1];
+                        const i = prog[2];
+                        if (prog.length !== 3 && prog.length !== 4) {
+                            throw new Error(`the number of args for 'subString' should be 2 or 3.`);
+                        }
+                        else if (!isItem(str) || str.type != ItemType.Str) {
+                            throw new Error("the 1st item of the arg for 'subString' should be a string.");
+                        }
+                        else {
+                            if (prog.length == 3) {
+                                // str.substring(i)
+                                return subString(str, i);
+                            }
+                            else {
+                                // str.substring(i,j)
+                                return subString(str, i, prog[3]);
+                            }
+                        }
+                    }
+                    // set manipulations
+                    else if (op.id === "set!") {
+                        const vari = prog[1];
+                        const replacer = prog[2];
+                        if (prog.length !== 3) {
+                            throw invalidLengthException('set!', 2);
+                        }
+                        else if (!isItem(vari) || !isItem(replacer)
+                            || env[vari.id][0].value.type != replacer.type) {
+                            throw new Error("the type of replace and variable should be the same.");
+                        }
+                        else {
+                            env[vari.id][0].value = prog[2];
+                            return { type: ItemType.Unit };
+                        }
+                    }
+                    else if (op.id === "addPDFPage") {
+                        if (prog.length !== 2) {
+                            throw invalidLengthException('addPDFPage', 1);
+                        }
+                        else if (astToString(argsMapped[0]) !== "'()") {
+                            throw new Error("the arg of addPdfPage should be a empty string '()");
+                        }
+                        else {
+                            const page = pdfDoc.addPage();
+                            return {
+                                type: ItemType.Unit,
+                            };
+                        }
+                        const rtn = argsMapped[argsMapped.length - 1];
+                        return rtn;
+                    }
+                    // procedures returning the last called command
+                    else if (op.id === "begin") {
+                        const rtn = argsMapped[argsMapped.length - 1];
+                        return rtn;
+                    }
                     // other named function call
                     else {
                         const caller = interp(prog[0], env);
@@ -509,7 +702,7 @@ function interp(prog, env) {
                         const varArgLen = varArgs.length;
                         const argsMappedLen = argsMapped.length;
                         if (argsMappedLen !== varArgLen) {
-                            throw new Error("the number of the arguments is"
+                            throw new Error("the number of the arguments of the caller is"
                                 + " not the same of that of the input vars.");
                         }
                         else {
@@ -604,11 +797,17 @@ function evaluate(expr) {
 // evaluate("@(let (a 17) (+ a 10))@")
 // eval print loop
 const readline = require("node:readline");
+const node_process_1 = require("node:process");
 const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
 });
-rl.question(`What's your program?`, (prog) => {
+async function run() {
+    pdfDoc = await pdf_lib_1.PDFDocument.create();
+    const prog = fs.readFileSync(filename, { encoding: 'utf8' });
     console.log(evaluate(prog));
-    rl.close();
-});
+    const pdfBytes = await pdfDoc.save();
+    fs.writeFileSync(filename + '.pdf', pdfBytes, 'binary');
+    (0, node_process_1.exit)(0);
+}
+run();
