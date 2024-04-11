@@ -18,9 +18,13 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs = __importStar(require("fs"));
 const pdf_lib_1 = require("pdf-lib");
+const fontkit_1 = __importDefault(require("@pdf-lib/fontkit"));
 const typescript_parsec_1 = require("typescript-parsec");
 const typescript_parsec_2 = require("typescript-parsec");
 /** input lisp file */
@@ -358,6 +362,34 @@ function cons(h, t) {
     };
     return rtnList;
 }
+/* PDF manipulation */
+async function drawText(pageIndex, fontFamily, textSize, color, x, y, text) {
+    let currentPage = pdfDoc.getPages()[0];
+    const fcMatch = await (0, child_process_1.spawnSync)('fc-match', ['--format=%{file}', fontFamily]);
+    const path = fcMatch.stdout.toString();
+    pdfDoc.registerFontkit(fontkit_1.default);
+    const fontBytes = fs.readFileSync(path);
+    console.log("A2A", (0, pdf_lib_1.rgb)(0, 0, 0));
+    const customFont = await pdfDoc.embedFont(fontBytes);
+    console.log("A3A", (0, pdf_lib_1.rgb)(0, 0, 0));
+    const rgbColor = await hexColorToRGB(color);
+    console.log("A4A", (0, pdf_lib_1.rgb)(0, 0, 0));
+    let a = await pdfDoc.getPage(0).drawText(text, {
+        x: x,
+        y: y,
+        size: textSize,
+        font: customFont,
+        color: rgbColor,
+    });
+    await pdfDoc.save();
+}
+async function hexColorToRGB(hex) {
+    let rgbHex = /[#]?(\d{2})(\d{2})(\d{2})/.exec(hex);
+    let r = parseInt(rgbHex[1], 16) / 256.0;
+    let g = parseInt(rgbHex[2], 16) / 256.0;
+    let b = parseInt(rgbHex[3], 16) / 256.0;
+    return (0, pdf_lib_1.rgb)(r, g, b);
+}
 function listRef(l, i) {
     const realI = i.int;
     if (realI >= l.list.length || realI < 0) {
@@ -395,7 +427,7 @@ function isItemId(x) {
 function isClosure(x) {
     return x.hasOwnProperty('type') && x.hasOwnProperty('vars');
 }
-function interp(prog, env) {
+async function interp(prog, env) {
     if (Array.isArray(prog)) {
         if (!Array.isArray(prog[0])) {
             const op = prog[0];
@@ -462,7 +494,7 @@ function interp(prog, env) {
                                 const vari = binding[0];
                                 if (vari.hasOwnProperty("id")) {
                                     const variName = vari.id;
-                                    const data = interp(binding[1], env);
+                                    const data = await interp(binding[1], env);
                                     if (op.id === "letrec") {
                                         newEnv = extendEnv(newEnv, variName, true, data);
                                     }
@@ -482,7 +514,7 @@ function interp(prog, env) {
                         throw invalidLengthException('if', 3);
                     }
                     else {
-                        const cond = interp(prog[1], env);
+                        const cond = await interp(prog[1], env);
                         if (Array.isArray(cond)) {
                             throw new Error("cond can't be reduced to a constant");
                         }
@@ -499,9 +531,9 @@ function interp(prog, env) {
                     }
                 }
                 else {
-                    const argsMapped = prog.slice(1).map((x) => {
+                    const argsMapped = await Promise.all(prog.slice(1).map(async (x) => {
                         return interp(x, env);
-                    });
+                    }));
                     // binary basic operator
                     if (op.id === "+") {
                         return interpBinary(add, argsMapped);
@@ -674,6 +706,7 @@ function interp(prog, env) {
                             return { type: ItemType.Unit };
                         }
                     }
+                    // PDFManipulation
                     else if (op.id === "addPDFPage") {
                         if (prog.length !== 2) {
                             throw invalidLengthException('addPDFPage', 1);
@@ -687,8 +720,23 @@ function interp(prog, env) {
                                 type: ItemType.Unit,
                             };
                         }
-                        const rtn = argsMapped[argsMapped.length - 1];
-                        return rtn;
+                    }
+                    else if (op.id === "drawText") {
+                        if (prog.length !== 7) {
+                            throw invalidLengthException('drawText', 6);
+                        }
+                        else {
+                            const fontFamily = argsMapped[0].str;
+                            const textSize = argsMapped[1].int;
+                            const color = argsMapped[2].str;
+                            const x = argsMapped[3].flo;
+                            const y = argsMapped[4].flo;
+                            const text = argsMapped[5].str;
+                            drawText(pdfDoc.getPageCount() - 1, fontFamily, textSize, color, x, y, text);
+                            return {
+                                type: ItemType.Unit,
+                            };
+                        }
                     }
                     // procedures returning the last called command
                     else if (op.id === "begin") {
@@ -697,7 +745,7 @@ function interp(prog, env) {
                     }
                     // other named function call
                     else {
-                        const caller = interp(prog[0], env);
+                        const caller = await interp(prog[0], env);
                         const varArgs = caller.vars;
                         const varArgLen = varArgs.length;
                         const argsMappedLen = argsMapped.length;
@@ -736,10 +784,10 @@ function interp(prog, env) {
             // the caller which is a higher-function call
         }
         else {
-            const argsMapped = prog.slice(1).map((x) => {
+            const argsMapped = await Promise.all(prog.slice(1).map((x) => {
                 return interp(x, env);
-            });
-            const caller = interp(prog[0], env);
+            }));
+            const caller = await interp(prog[0], env);
             const varArgs = caller.vars;
             const varArgLen = varArgs.length;
             const argsMappedLen = argsMapped.length;
@@ -788,9 +836,9 @@ function interp(prog, env) {
         }
     }
 }
-function evaluate(expr) {
+async function evaluate(expr) {
     const input = (0, typescript_parsec_1.expectSingleResult)((0, typescript_parsec_1.expectEOF)(LISP.parse(tokenizer.parse(expr))));
-    const interped = interp(input, emptyEnv);
+    const interped = await interp(input, emptyEnv);
     return astToString(interped);
 }
 // evaluate(`(main '((text 12)) [ 快狐跳懶狗\\\\\\\[\\\]\\\(\\\)(italic "fox and dog") (bold [OK])])`)
@@ -798,6 +846,7 @@ function evaluate(expr) {
 // eval print loop
 const readline = require("node:readline");
 const node_process_1 = require("node:process");
+const child_process_1 = require("child_process");
 const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -805,7 +854,7 @@ const rl = readline.createInterface({
 async function run() {
     pdfDoc = await pdf_lib_1.PDFDocument.create();
     const prog = fs.readFileSync(filename, { encoding: 'utf8' });
-    console.log(evaluate(prog));
+    console.log(await evaluate(prog));
     const pdfBytes = await pdfDoc.save();
     fs.writeFileSync(filename + '.pdf', pdfBytes, 'binary');
     (0, node_process_1.exit)(0);

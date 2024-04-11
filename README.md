@@ -12,6 +12,6 @@
  - [v] add pdf page 240410 (addPDFPages)
  - [v] create pdf 240410
  - [ ] close pdf
- - [ ] add character
+ - [v] add character
  - [ ] add path
  - [ ] basic typesetting format

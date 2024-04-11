@@ -1,5 +1,6 @@
 import * as fs from 'fs';
-import { PDFDocument } from 'pdf-lib'
+import { PDFDocument , RGB, rgb, StandardFonts} from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
 import { Token } from "typescript-parsec";
 import {
   buildLexer,
@@ -465,6 +466,48 @@ function cons(h: AST, t : List) : List {
     return rtnList;
 }
 
+/* PDF manipulation */
+async function drawText(pageIndex : number,
+                fontFamily : string,
+                textSize : number,
+                color : string,
+                x : number,
+                y : number,
+                text : string){
+  let currentPage = pdfDoc.getPages()[0];
+
+const fcMatch = await spawnSync('fc-match', ['--format=%{file}', fontFamily]);
+const path = fcMatch.stdout.toString();
+ pdfDoc.registerFontkit(fontkit);
+   const fontBytes = fs.readFileSync(path);
+   console.log("A2A",rgb(0,0,0));
+
+  const customFont = await pdfDoc.embedFont(fontBytes);
+  console.log("A3A",rgb(0,0,0));
+
+  const rgbColor = await hexColorToRGB(color);
+  console.log("A4A",rgb(0,0,0));
+
+  let a = await pdfDoc.getPage(0).drawText(text, {
+    x: x,
+    y: y,
+    size: textSize,
+    font: customFont,
+    color: rgbColor,
+  });
+  await pdfDoc.save();
+  
+}
+
+
+async function hexColorToRGB(hex: string): Promise<RGB>{
+  let rgbHex = /[#]?(\d{2})(\d{2})(\d{2})/.exec(hex);
+  let r = parseInt((rgbHex as RegExpExecArray)[1], 16)/256.0;
+  let g = parseInt((rgbHex as RegExpExecArray)[2], 16)/256.0;
+  let b = parseInt((rgbHex as RegExpExecArray)[3], 16)/256.0;
+  return rgb(r,g,b);
+}
+
 function listRef(l: List, i: ItemInt): AST {
   const realI = i.int;
   if (realI >= l.list.length || realI < 0){
@@ -509,7 +552,7 @@ function isClosure(x: any): x is Closure {
     return x.hasOwnProperty('type') && x.hasOwnProperty('vars');
 }
 
-function interp(prog: AST, env: Env): AST {
+async function interp(prog: AST, env: Env): Promise<AST> {
   if (Array.isArray(prog)) {
     if (!Array.isArray(prog[0])) {
       const op = prog[0];
@@ -572,7 +615,7 @@ function interp(prog: AST, env: Env): AST {
                         const vari = binding[0];
                         if (vari.hasOwnProperty("id")){
                             const variName = (vari as ItemId).id;
-                            const data = interp(binding[1], env);
+                            const data = await interp(binding[1], env);
                             if (op.id === "letrec"){
                               newEnv = extendEnv(newEnv, variName , true, data);
                             }else{
@@ -590,7 +633,7 @@ function interp(prog: AST, env: Env): AST {
             if (prog.length !== 4){
                 throw invalidLengthException('if', 3);
             }else{
-              const cond = interp(prog[1], env);
+              const cond = await interp(prog[1], env);
                 if (Array.isArray(cond)){
                     throw new Error("cond can't be reduced to a constant");
                 }else if (cond.type !== ItemType.Bool){
@@ -605,9 +648,9 @@ function interp(prog: AST, env: Env): AST {
         }
         else{
 
-        const argsMapped = prog.slice(1).map((x) => {
+        const argsMapped = await Promise.all( prog.slice(1).map(async (x) => {
           return interp(x, env);
-        });
+        }));
         // binary basic operator
         if (op.id === "+") {
           return interpBinary(add, argsMapped);
@@ -750,6 +793,7 @@ function interp(prog: AST, env: Env): AST {
             return {type:ItemType.Unit};
           }
         }
+        // PDFManipulation
         else if (op.id === "addPDFPage"){
           if (prog.length !== 2){
             throw invalidLengthException('addPDFPage', 1);
@@ -761,20 +805,41 @@ function interp(prog: AST, env: Env): AST {
               type:ItemType.Unit,
             }
           }
-
-            const rtn = argsMapped[argsMapped.length-1];
-            return rtn;
+        }
+        else if (op.id === "drawText"){
+          if (prog.length !== 7){
+            throw invalidLengthException('drawText', 6);
+          }else{
+            const fontFamily = (argsMapped[0] as ItemStr).str;
+            const textSize = (argsMapped[1] as ItemInt).int;
+            const color = (argsMapped[2] as ItemStr).str;
+            const x = (argsMapped[3] as ItemFlo).flo;
+            const y = (argsMapped[4] as ItemFlo).flo;
+            const text = (argsMapped[5] as ItemStr).str;
+            drawText(
+              pdfDoc.getPageCount()-1,
+              fontFamily,
+              textSize,
+              color,
+              x,
+              y,
+              text);
+            return {
+              type:ItemType.Unit,
+            }
+          }
         }
         // procedures returning the last called command
         else if (op.id === "begin"){
           const rtn = argsMapped[argsMapped.length-1];
           return rtn;
       }
+      
         
         // other named function call
         else {
 
-          const caller = interp(prog[0],env);
+          const caller = await interp(prog[0],env);
 
 
           const varArgs = ((caller as Closure).vars as ItemId[]);
@@ -816,10 +881,10 @@ function interp(prog: AST, env: Env): AST {
       }
     // the caller which is a higher-function call
     } else {
-      const argsMapped = prog.slice(1).map((x) => {
+      const argsMapped = await Promise.all(prog.slice(1).map((x) => {
         return interp(x, env);
-      });
-      const caller = interp(prog[0], env);
+      }));
+      const caller = await interp(prog[0], env);
 
       const varArgs = (caller as Closure).vars as ItemId[];
       const varArgLen = varArgs.length;
@@ -876,9 +941,9 @@ function interp(prog: AST, env: Env): AST {
   }
 }
 
-function evaluate(expr: string): string {
+async function evaluate(expr: string): Promise<string> {
   const input = expectSingleResult(expectEOF(LISP.parse(tokenizer.parse(expr))));
-  const interped = interp(input, emptyEnv);
+  const interped = await interp(input, emptyEnv);
   return astToString(interped);
 }
 
@@ -888,6 +953,7 @@ function evaluate(expr: string): string {
 // eval print loop
 import readline = require("node:readline");
 import { exit } from "node:process";
+import { spawnSync } from 'child_process';
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -901,7 +967,7 @@ async function run(){
 
   const prog = fs.readFileSync(filename, { encoding: 'utf8' });
 
-  console.log(evaluate(prog));
+  console.log(await evaluate(prog));
 
   const pdfBytes = await pdfDoc.save();
   fs.writeFileSync(filename+'.pdf', pdfBytes, 'binary');
