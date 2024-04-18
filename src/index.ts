@@ -20,7 +20,7 @@ import {
   tok,
   opt,
 } from "typescript-parsec";
-
+import {inspect} from "node:util";
 
 
 /** input lisp file */
@@ -265,6 +265,55 @@ CON_STR.setPattern(
   apply(kmid(str("["), rep_sc(CON_STR_INNER), str("]")), applyStrings)
 );
 
+/**
+ * measuer the width of a test in px
+ * @param inputString the string to be measured
+ * @param fontFamily font family name
+ * @param fontSizePt font size in pt
+ * @returns the width in px
+ */
+async function measureWidthPx(inputString: string, fontFamily : string, fontSizePt: number): Promise<number>{
+  return await WebAssembly.instantiate(fs.readFileSync(__dirname+"/../3rdparty/harfbuzzjs/hb.wasm"))
+      .then(function (wsm) {
+      var hb = require('harfbuzzjs/hbjs');
+      hb = hb(wsm.instance);
+
+      let fontName =  spawnSync('fc-match', ['--format=%{file}', fontFamily]);
+      const fontPath = fontName.stdout.toString();
+      let fontdata = fs.readFileSync(fontPath);
+
+
+          var blob = hb.createBlob(fontdata); // Load the font data into something Harfbuzz can use
+          var face = hb.createFace(blob, 0);  // Select the first font in the file (there's normally only one!)
+          var font = hb.createFont(face);     // Create a Harfbuzz font object from the face
+          font.setScale(fontSizePt * 4/3* 1000 , fontSizePt*4/3 * 1000 );
+          var buffer = hb.createBuffer();     // Make a buffer to hold some text
+          buffer.addText(inputString);              // Fill it with some stuff
+          buffer.guessSegmentProperties();    // Set script, language and direction
+          hb.shape(font, buffer);             // Shape the text, determining glyph IDs and positions
+          var output : Array<{g : number,
+                              ax : number,
+                              dx : number,
+                              dy : number}> = buffer.json();
+
+          var totalX = 0;
+          for (var glyph of output) {
+              var xAdvance = glyph.ax;
+              totalX += xAdvance;
+
+          }
+
+          // Release memory
+          buffer.destroy();
+          font.destroy();
+          face.destroy();
+          blob.destroy(); 
+
+          return totalX / 1000;
+  });
+}
+
+
 function astToString(ast: AST, isInQuoted? : boolean): string {
   if (Array.isArray(ast)) {
     const ast2 = ast.map((x)=>astToString(x, isInQuoted));
@@ -480,13 +529,10 @@ const fcMatch = await spawnSync('fc-match', ['--format=%{file}', fontFamily]);
 const path = fcMatch.stdout.toString();
  pdfDoc.registerFontkit(fontkit);
    const fontBytes = fs.readFileSync(path);
-   console.log("A2A",rgb(0,0,0));
 
   const customFont = await pdfDoc.embedFont(fontBytes);
-  console.log("A3A",rgb(0,0,0));
 
   const rgbColor = await hexColorToRGB(color);
-  console.log("A4A",rgb(0,0,0));
 
   let a = await pdfDoc.getPage(0).drawText(text, {
     x: x,
@@ -501,10 +547,10 @@ const path = fcMatch.stdout.toString();
 
 
 async function hexColorToRGB(hex: string): Promise<RGB>{
-  let rgbHex = /[#]?(\d{2})(\d{2})(\d{2})/.exec(hex);
-  let r = parseInt((rgbHex as RegExpExecArray)[1], 16)/256.0;
-  let g = parseInt((rgbHex as RegExpExecArray)[2], 16)/256.0;
-  let b = parseInt((rgbHex as RegExpExecArray)[3], 16)/256.0;
+  let rgbHex = /[#]?([\dA-Fa-f]{2})([\dA-Fa-f]{2})([\dA-Fa-f]{2})/.exec(hex);
+  let r = parseInt((rgbHex as RegExpExecArray)[1], 16)/255.0;
+  let g = parseInt((rgbHex as RegExpExecArray)[2], 16)/255.0;
+  let b = parseInt((rgbHex as RegExpExecArray)[3], 16)/255.0;
   return rgb(r,g,b);
 }
 
@@ -587,6 +633,22 @@ async function interp(prog: AST, env: Env): Promise<AST> {
                 }
             }
         }
+        // define manipulation
+        if (op.id === "define") {
+          const vari : ItemId = prog[1] as ItemId;
+          const data = await interp(prog[2], env);
+          if (prog.length !== 3){
+            throw invalidLengthException('define', 2);
+          }else if (!isItem(vari) || !isItem(data)){
+            throw new Error("the type of replace and variable should be the same.")
+          }else if(env[vari.id] !== undefined){
+            throw new Error("variable can't be duplicated defined.")
+          }else {
+            env = extendEnv(env, vari.id, true, data);
+            return {type:ItemType.Unit};
+          }
+        }
+
         /** let function */
         else if (op.id === "let" || op.id === "letrec"){
             const bindings = prog[1];
@@ -647,10 +709,16 @@ async function interp(prog: AST, env: Env): Promise<AST> {
             }
         }
         else{
+          let argsMapped = [];
+          for (var i=1;i<prog.length;i++){
+            argsMapped.push(await interp(prog[i], env));
+          }
 
-        const argsMapped = await Promise.all( prog.slice(1).map(async (x) => {
+
+
+        /* const argsMapped = await Promise.all( prog.slice(1).map(async (x) => {
           return interp(x, env);
-        }));
+        })); */
         // binary basic operator
         if (op.id === "+") {
           return interpBinary(add, argsMapped);
@@ -706,7 +774,69 @@ async function interp(prog: AST, env: Env): Promise<AST> {
               };
             }
           }
-        } else if (op.id === "car") {
+        }else if (op.id === "and"){
+        if (prog.length !== 3){
+          throw invalidLengthException('and', 2);
+        }else if (!argsMapped[0].hasOwnProperty('type') || (argsMapped[0] as Item).type !== ItemType.Bool
+        || !argsMapped[1].hasOwnProperty('type') || (argsMapped[1] as Item).type !== ItemType.Bool){
+          throw new Error("the arg of 'and' is not valid boolean value")
+        }else{
+          let ret = {
+            type : ItemType.Bool,
+            bool: (argsMapped[0] as ItemBool).bool && (argsMapped[1] as ItemBool).bool
+          };
+          return ret as Item;
+        }
+      }else if (op.id === "or"){
+        if (prog.length !== 3){
+          throw invalidLengthException('or', 2);
+        }else if (!argsMapped[0].hasOwnProperty('type') || (argsMapped[0] as Item).type !== ItemType.Bool
+        || !argsMapped[1].hasOwnProperty('type') || (argsMapped[1] as Item).type !== ItemType.Bool){
+          throw new Error("the arg of 'or' is not valid boolean value")
+        }else{
+          let ret = {
+            type : ItemType.Bool,
+            bool: (argsMapped[0] as ItemBool).bool || (argsMapped[1] as ItemBool).bool
+          };
+          return ret as Item;
+        }
+      }
+
+     // measuring
+     else if (op.id === "measureWidthPx"){
+      if (prog.length !== 4){
+        throw invalidLengthException('measureWidthPx', 3);
+      }else{
+        let text = (argsMapped[0] as ItemStr).str;
+        let fontfamily = (argsMapped[1] as ItemStr).str;
+        let sizePt = (argsMapped[2] as ItemFlo).flo;
+        let returnValue = await measureWidthPx(text, fontfamily, sizePt);
+        return {
+          type: ItemType.Flo,
+          flo: returnValue
+        } 
+      }
+    }
+
+        else if (op.id === "isList"){
+          const arg = argsMapped[0];
+          if (prog.length !== 2){
+            throw invalidLengthException('isList', 1);
+          }else if ((arg as Item).type === ItemType.Ls){
+ 
+            let a =  {
+              type: ItemType.Bool,
+              bool: true as boolean,
+            };
+            return a as Item;
+          }else{
+            return {
+              type: ItemType.Bool,
+              bool: false as boolean,
+            };
+          }
+        }
+        else if (op.id === "car") {
           const arg = argsMapped[0];
           if (prog.length !== 2){
             throw invalidLengthException('car', 1);
@@ -728,7 +858,7 @@ async function interp(prog: AST, env: Env): Promise<AST> {
         }else if (op.id === "cons") {
           const arg = argsMapped;
           if (prog.length !== 3){
-            throw invalidLengthException('cdr', 2);
+            throw invalidLengthException('cons', 2);
           }else if (!arg[1].hasOwnProperty('type') || (arg[1] as Item).type !== ItemType.Ls){
             throw new Error("the 2nd arg of 'cons' is not a list.")
           }else{
@@ -778,11 +908,10 @@ async function interp(prog: AST, env: Env): Promise<AST> {
             return subString(str, i as ItemInt, prog[3] as ItemInt);}
           }
         }
-
         // set manipulations
         else if (op.id === "set!") {
           const vari : ItemId = prog[1] as ItemId;
-          const replacer = prog[2];
+          const replacer = await interp(prog[2], env);
           if (prog.length !== 3){
             throw invalidLengthException('set!', 2);
           }else if (!isItem(vari) || !isItem(replacer)
@@ -968,6 +1097,7 @@ async function run(){
   const prog = fs.readFileSync(filename, { encoding: 'utf8' });
 
   console.log(await evaluate(prog));
+ 
 
   const pdfBytes = await pdfDoc.save();
   fs.writeFileSync(filename+'.pdf', pdfBytes, 'binary');

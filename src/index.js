@@ -157,6 +157,43 @@ SINGLE.setPattern((0, typescript_parsec_2.alt)((0, typescript_parsec_2.apply)((0
 LISPS.setPattern((0, typescript_parsec_2.alt)((0, typescript_parsec_2.apply)((0, typescript_parsec_2.kmid)((0, typescript_parsec_2.seq)((0, typescript_parsec_2.str)("("), __), (0, typescript_parsec_2.rep_sc)(LISP), (0, typescript_parsec_2.str)(")")), applyList), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.kright)((0, typescript_parsec_2.str)("'"), (0, typescript_parsec_2.kmid)((0, typescript_parsec_2.seq)((0, typescript_parsec_2.str)("("), __), (0, typescript_parsec_2.rep_sc)(LISP), (0, typescript_parsec_2.str)(")"))), applyQuoted)));
 CON_STR_INNER.setPattern((0, typescript_parsec_2.alt)((0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.Id), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.Int), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.Flo), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.Str), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.Other), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.SpaceNL), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.kright)((0, typescript_parsec_2.tok)(TokenKind.BSlash), (0, typescript_parsec_2.tok)(TokenKind.LParen)), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.kright)((0, typescript_parsec_2.tok)(TokenKind.BSlash), (0, typescript_parsec_2.tok)(TokenKind.RParen)), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.kright)((0, typescript_parsec_2.tok)(TokenKind.BSlash), (0, typescript_parsec_2.tok)(TokenKind.LBrack)), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.kright)((0, typescript_parsec_2.tok)(TokenKind.BSlash), (0, typescript_parsec_2.tok)(TokenKind.RBrack)), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.kright)((0, typescript_parsec_2.tok)(TokenKind.BSlash), (0, typescript_parsec_2.tok)(TokenKind.Apos)), tokenToStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.kright)((0, typescript_parsec_2.tok)(TokenKind.BSlash), (0, typescript_parsec_2.tok)(TokenKind.BSlash)), bSlashTokenToStr), LISPS));
 CON_STR.setPattern((0, typescript_parsec_2.apply)((0, typescript_parsec_2.kmid)((0, typescript_parsec_2.str)("["), (0, typescript_parsec_2.rep_sc)(CON_STR_INNER), (0, typescript_parsec_2.str)("]")), applyStrings));
+/**
+ * measuer the width of a test in px
+ * @param inputString the string to be measured
+ * @param fontFamily font family name
+ * @param fontSizePt font size in pt
+ * @returns the width in px
+ */
+async function measureWidthPx(inputString, fontFamily, fontSizePt) {
+    return await WebAssembly.instantiate(fs.readFileSync(__dirname + "/../3rdparty/harfbuzzjs/hb.wasm"))
+        .then(function (wsm) {
+        var hb = require('harfbuzzjs/hbjs');
+        hb = hb(wsm.instance);
+        let fontName = (0, child_process_1.spawnSync)('fc-match', ['--format=%{file}', fontFamily]);
+        const fontPath = fontName.stdout.toString();
+        let fontdata = fs.readFileSync(fontPath);
+        var blob = hb.createBlob(fontdata); // Load the font data into something Harfbuzz can use
+        var face = hb.createFace(blob, 0); // Select the first font in the file (there's normally only one!)
+        var font = hb.createFont(face); // Create a Harfbuzz font object from the face
+        font.setScale(fontSizePt * 4 / 3 * 1000, fontSizePt * 4 / 3 * 1000);
+        var buffer = hb.createBuffer(); // Make a buffer to hold some text
+        buffer.addText(inputString); // Fill it with some stuff
+        buffer.guessSegmentProperties(); // Set script, language and direction
+        hb.shape(font, buffer); // Shape the text, determining glyph IDs and positions
+        var output = buffer.json();
+        var totalX = 0;
+        for (var glyph of output) {
+            var xAdvance = glyph.ax;
+            totalX += xAdvance;
+        }
+        // Release memory
+        buffer.destroy();
+        font.destroy();
+        face.destroy();
+        blob.destroy();
+        return totalX / 1000;
+    });
+}
 function astToString(ast, isInQuoted) {
     if (Array.isArray(ast)) {
         const ast2 = ast.map((x) => astToString(x, isInQuoted));
@@ -369,11 +406,8 @@ async function drawText(pageIndex, fontFamily, textSize, color, x, y, text) {
     const path = fcMatch.stdout.toString();
     pdfDoc.registerFontkit(fontkit_1.default);
     const fontBytes = fs.readFileSync(path);
-    console.log("A2A", (0, pdf_lib_1.rgb)(0, 0, 0));
     const customFont = await pdfDoc.embedFont(fontBytes);
-    console.log("A3A", (0, pdf_lib_1.rgb)(0, 0, 0));
     const rgbColor = await hexColorToRGB(color);
-    console.log("A4A", (0, pdf_lib_1.rgb)(0, 0, 0));
     let a = await pdfDoc.getPage(0).drawText(text, {
         x: x,
         y: y,
@@ -384,10 +418,10 @@ async function drawText(pageIndex, fontFamily, textSize, color, x, y, text) {
     await pdfDoc.save();
 }
 async function hexColorToRGB(hex) {
-    let rgbHex = /[#]?(\d{2})(\d{2})(\d{2})/.exec(hex);
-    let r = parseInt(rgbHex[1], 16) / 256.0;
-    let g = parseInt(rgbHex[2], 16) / 256.0;
-    let b = parseInt(rgbHex[3], 16) / 256.0;
+    let rgbHex = /[#]?([\dA-Fa-f]{2})([\dA-Fa-f]{2})([\dA-Fa-f]{2})/.exec(hex);
+    let r = parseInt(rgbHex[1], 16) / 255.0;
+    let g = parseInt(rgbHex[2], 16) / 255.0;
+    let b = parseInt(rgbHex[3], 16) / 255.0;
     return (0, pdf_lib_1.rgb)(r, g, b);
 }
 function listRef(l, i) {
@@ -463,6 +497,24 @@ async function interp(prog, env) {
                         };
                     }
                 }
+                // define manipulation
+                if (op.id === "define") {
+                    const vari = prog[1];
+                    const data = await interp(prog[2], env);
+                    if (prog.length !== 3) {
+                        throw invalidLengthException('define', 2);
+                    }
+                    else if (!isItem(vari) || !isItem(data)) {
+                        throw new Error("the type of replace and variable should be the same.");
+                    }
+                    else if (env[vari.id] !== undefined) {
+                        throw new Error("variable can't be duplicated defined.");
+                    }
+                    else {
+                        env = extendEnv(env, vari.id, true, data);
+                        return { type: ItemType.Unit };
+                    }
+                }
                 /** let function */
                 else if (op.id === "let" || op.id === "letrec") {
                     const bindings = prog[1];
@@ -531,9 +583,13 @@ async function interp(prog, env) {
                     }
                 }
                 else {
-                    const argsMapped = await Promise.all(prog.slice(1).map(async (x) => {
-                        return interp(x, env);
-                    }));
+                    let argsMapped = [];
+                    for (var i = 1; i < prog.length; i++) {
+                        argsMapped.push(await interp(prog[i], env));
+                    }
+                    /* const argsMapped = await Promise.all( prog.slice(1).map(async (x) => {
+                      return interp(x, env);
+                    })); */
                     // binary basic operator
                     if (op.id === "+") {
                         return interpBinary(add, argsMapped);
@@ -604,6 +660,73 @@ async function interp(prog, env) {
                             }
                         }
                     }
+                    else if (op.id === "and") {
+                        if (prog.length !== 3) {
+                            throw invalidLengthException('and', 2);
+                        }
+                        else if (!argsMapped[0].hasOwnProperty('type') || argsMapped[0].type !== ItemType.Bool
+                            || !argsMapped[1].hasOwnProperty('type') || argsMapped[1].type !== ItemType.Bool) {
+                            throw new Error("the arg of 'and' is not valid boolean value");
+                        }
+                        else {
+                            let ret = {
+                                type: ItemType.Bool,
+                                bool: argsMapped[0].bool && argsMapped[1].bool
+                            };
+                            return ret;
+                        }
+                    }
+                    else if (op.id === "or") {
+                        if (prog.length !== 3) {
+                            throw invalidLengthException('or', 2);
+                        }
+                        else if (!argsMapped[0].hasOwnProperty('type') || argsMapped[0].type !== ItemType.Bool
+                            || !argsMapped[1].hasOwnProperty('type') || argsMapped[1].type !== ItemType.Bool) {
+                            throw new Error("the arg of 'or' is not valid boolean value");
+                        }
+                        else {
+                            let ret = {
+                                type: ItemType.Bool,
+                                bool: argsMapped[0].bool || argsMapped[1].bool
+                            };
+                            return ret;
+                        }
+                    }
+                    // measuring
+                    else if (op.id === "measureWidthPx") {
+                        if (prog.length !== 4) {
+                            throw invalidLengthException('measureWidthPx', 3);
+                        }
+                        else {
+                            let text = argsMapped[0].str;
+                            let fontfamily = argsMapped[1].str;
+                            let sizePt = argsMapped[2].flo;
+                            let returnValue = await measureWidthPx(text, fontfamily, sizePt);
+                            return {
+                                type: ItemType.Flo,
+                                flo: returnValue
+                            };
+                        }
+                    }
+                    else if (op.id === "isList") {
+                        const arg = argsMapped[0];
+                        if (prog.length !== 2) {
+                            throw invalidLengthException('isList', 1);
+                        }
+                        else if (arg.type === ItemType.Ls) {
+                            let a = {
+                                type: ItemType.Bool,
+                                bool: true,
+                            };
+                            return a;
+                        }
+                        else {
+                            return {
+                                type: ItemType.Bool,
+                                bool: false,
+                            };
+                        }
+                    }
                     else if (op.id === "car") {
                         const arg = argsMapped[0];
                         if (prog.length !== 2) {
@@ -631,7 +754,7 @@ async function interp(prog, env) {
                     else if (op.id === "cons") {
                         const arg = argsMapped;
                         if (prog.length !== 3) {
-                            throw invalidLengthException('cdr', 2);
+                            throw invalidLengthException('cons', 2);
                         }
                         else if (!arg[1].hasOwnProperty('type') || arg[1].type !== ItemType.Ls) {
                             throw new Error("the 2nd arg of 'cons' is not a list.");
@@ -693,7 +816,7 @@ async function interp(prog, env) {
                     // set manipulations
                     else if (op.id === "set!") {
                         const vari = prog[1];
-                        const replacer = prog[2];
+                        const replacer = await interp(prog[2], env);
                         if (prog.length !== 3) {
                             throw invalidLengthException('set!', 2);
                         }

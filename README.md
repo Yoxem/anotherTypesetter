@@ -15,3 +15,4 @@
  - [v] add character
  - [ ] add path
  - [ ] basic typesetting format
+ - [v] text measuring width in pt
