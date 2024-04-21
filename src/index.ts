@@ -39,7 +39,8 @@ enum TokenKind {
   RBrack,
   SpaceNL,
   BSlash,
-  Apos,
+  Apos,  // Apostrophe
+  Cmt, // comment
   Other,
 }
 
@@ -124,17 +125,17 @@ const tokenizer = buildLexer([
   [true, /^'/g, TokenKind.Apos],
   [true, /^(\s|\t|\r?\n)+/g, TokenKind.SpaceNL],
   [true, /^\\/g, TokenKind.BSlash],
+  [false, /^\/\/[^\/\r\n]+(\r?\n)/g, TokenKind.Cmt], // omit the comment
   [true, /^([^+\-*/a-zA-Z_0-9\[\]()'\s\t\r\n\\]+)/g, TokenKind.Other],
 ]);
 
 /*
  * ## BNF
-LISP = UNIT | LISPS | CON_STR
+LISP = SINGLE | LISPS | CON_STR
 LISPS = "(" LISP ")" | "'" "(" LISP ")"
-SINGLE = "{" CONSTR_INNR | LISP "}"
-UNIT = INT | NUMBER | STRING | ID
-CONSTR = "[" (CONSTR_INNER "]"
-CONSTR_INNER = ([^\\\[\][]] | [\\][{}\[\]]) | LISPS)*
+SINGLE  = INT | NUMBER | STRING | ID
+CON_STR = "[" CONSTR_INNER "]"
+CONSTR_INNER = ([^\\\[\]{}] | [\\][{}\[\]]) | LISPS)*
  */
 
 const SINGLE = rule<TokenKind, AST>();
@@ -216,7 +217,7 @@ function applyStrings(value: AST[]): AST {
 }
 
 /** for convinence to omit the spaces and newlines */
-const __ = opt(tok(TokenKind.SpaceNL));
+const __ = rep_sc(tok(TokenKind.SpaceNL));
 
 LISP.setPattern(alt(kleft(SINGLE, __), kleft(LISPS, __), kleft(CON_STR, __)));
 
@@ -286,7 +287,7 @@ async function measureWidthPx(inputString: string, fontFamily : string, fontSize
           var blob = hb.createBlob(fontdata); // Load the font data into something Harfbuzz can use
           var face = hb.createFace(blob, 0);  // Select the first font in the file (there's normally only one!)
           var font = hb.createFont(face);     // Create a Harfbuzz font object from the face
-          font.setScale(fontSizePt * 4/3* 1000 , fontSizePt*4/3 * 1000 );
+          font.setScale(fontSizePt  * 1000 , fontSizePt * 1000 );
           var buffer = hb.createBuffer();     // Make a buffer to hold some text
           buffer.addText(inputString);              // Fill it with some stuff
           buffer.guessSegmentProperties();    // Set script, language and direction
@@ -309,7 +310,7 @@ async function measureWidthPx(inputString: string, fontFamily : string, fontSize
           face.destroy();
           blob.destroy(); 
 
-          return totalX / 1000;
+          return totalX  / 1000;
   });
 }
 
@@ -523,7 +524,8 @@ async function drawText(pageIndex : number,
                 x : number,
                 y : number,
                 text : string){
-  let currentPage = pdfDoc.getPages()[0];
+  let pdfPages = pdfDoc.getPages();
+  let currentPage = pdfPages[pageIndex];
 
 const fcMatch = await spawnSync('fc-match', ['--format=%{file}', fontFamily]);
 const path = fcMatch.stdout.toString();
@@ -534,14 +536,14 @@ const path = fcMatch.stdout.toString();
 
   const rgbColor = await hexColorToRGB(color);
 
-  let a = await pdfDoc.getPage(0).drawText(text, {
+  let _ = await currentPage.drawText(text, {
     x: x,
     y: y,
     size: textSize,
     font: customFont,
     color: rgbColor,
   });
-  await pdfDoc.save();
+  
   
 }
 
@@ -918,7 +920,7 @@ async function interp(prog: AST, env: Env): Promise<AST> {
           || (env[vari.id][0].value as Item).type !=  replacer.type ){
             throw new Error("the type of replace and variable should be the same.")
           }else{
-            env[vari.id][0].value = prog[2];
+            env[vari.id][0].value = replacer;
             return {type:ItemType.Unit};
           }
         }
@@ -940,7 +942,7 @@ async function interp(prog: AST, env: Env): Promise<AST> {
             throw invalidLengthException('drawText', 6);
           }else{
             const fontFamily = (argsMapped[0] as ItemStr).str;
-            const textSize = (argsMapped[1] as ItemInt).int;
+            const textSize = (argsMapped[1] as ItemFlo).flo;
             const color = (argsMapped[2] as ItemStr).str;
             const x = (argsMapped[3] as ItemFlo).flo;
             const y = (argsMapped[4] as ItemFlo).flo;
@@ -953,6 +955,24 @@ async function interp(prog: AST, env: Env): Promise<AST> {
               x,
               y,
               text);
+            return {
+              type:ItemType.Unit,
+            }
+          }
+        }
+        // print to the console
+        else if (op.id === "print"){
+          if (prog.length !== 2){
+            throw invalidLengthException('print', 1);
+          }else{
+            let data = argsMapped[0];
+            let dataString;
+            if (data.hasOwnProperty("list")){
+              dataString = astToString(data, true);
+            }else{
+              dataString = astToString(data, false);
+            }
+            console.log(dataString);
             return {
               type:ItemType.Unit,
             }

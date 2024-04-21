@@ -44,7 +44,8 @@ var TokenKind;
     TokenKind[TokenKind["SpaceNL"] = 9] = "SpaceNL";
     TokenKind[TokenKind["BSlash"] = 10] = "BSlash";
     TokenKind[TokenKind["Apos"] = 11] = "Apos";
-    TokenKind[TokenKind["Other"] = 12] = "Other";
+    TokenKind[TokenKind["Cmt"] = 12] = "Cmt";
+    TokenKind[TokenKind["Other"] = 13] = "Other";
 })(TokenKind || (TokenKind = {}));
 var ItemType;
 (function (ItemType) {
@@ -71,16 +72,16 @@ const tokenizer = (0, typescript_parsec_1.buildLexer)([
     [true, /^'/g, TokenKind.Apos],
     [true, /^(\s|\t|\r?\n)+/g, TokenKind.SpaceNL],
     [true, /^\\/g, TokenKind.BSlash],
+    [false, /^\/\/[^\/\r\n]+(\r?\n)/g, TokenKind.Cmt],
     [true, /^([^+\-*/a-zA-Z_0-9\[\]()'\s\t\r\n\\]+)/g, TokenKind.Other],
 ]);
 /*
  * ## BNF
-LISP = UNIT | LISPS | CON_STR
+LISP = SINGLE | LISPS | CON_STR
 LISPS = "(" LISP ")" | "'" "(" LISP ")"
-SINGLE = "{" CONSTR_INNR | LISP "}"
-UNIT = INT | NUMBER | STRING | ID
-CONSTR = "[" (CONSTR_INNER "]"
-CONSTR_INNER = ([^\\\[\][]] | [\\][{}\[\]]) | LISPS)*
+SINGLE  = INT | NUMBER | STRING | ID
+CON_STR = "[" CONSTR_INNER "]"
+CONSTR_INNER = ([^\\\[\]{}] | [\\][{}\[\]]) | LISPS)*
  */
 const SINGLE = (0, typescript_parsec_1.rule)();
 const LISPS = (0, typescript_parsec_1.rule)();
@@ -151,7 +152,7 @@ function applyStrings(value) {
     return merged;
 }
 /** for convinence to omit the spaces and newlines */
-const __ = (0, typescript_parsec_2.opt)((0, typescript_parsec_2.tok)(TokenKind.SpaceNL));
+const __ = (0, typescript_parsec_2.rep_sc)((0, typescript_parsec_2.tok)(TokenKind.SpaceNL));
 LISP.setPattern((0, typescript_parsec_2.alt)((0, typescript_parsec_2.kleft)(SINGLE, __), (0, typescript_parsec_2.kleft)(LISPS, __), (0, typescript_parsec_2.kleft)(CON_STR, __)));
 SINGLE.setPattern((0, typescript_parsec_2.alt)((0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.Id), applyId), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.Int), applyInt), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.Flo), applyFlo), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.Str), applyStr), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.tok)(TokenKind.Bool), applyBool)));
 LISPS.setPattern((0, typescript_parsec_2.alt)((0, typescript_parsec_2.apply)((0, typescript_parsec_2.kmid)((0, typescript_parsec_2.seq)((0, typescript_parsec_2.str)("("), __), (0, typescript_parsec_2.rep_sc)(LISP), (0, typescript_parsec_2.str)(")")), applyList), (0, typescript_parsec_2.apply)((0, typescript_parsec_2.kright)((0, typescript_parsec_2.str)("'"), (0, typescript_parsec_2.kmid)((0, typescript_parsec_2.seq)((0, typescript_parsec_2.str)("("), __), (0, typescript_parsec_2.rep_sc)(LISP), (0, typescript_parsec_2.str)(")"))), applyQuoted)));
@@ -175,7 +176,7 @@ async function measureWidthPx(inputString, fontFamily, fontSizePt) {
         var blob = hb.createBlob(fontdata); // Load the font data into something Harfbuzz can use
         var face = hb.createFace(blob, 0); // Select the first font in the file (there's normally only one!)
         var font = hb.createFont(face); // Create a Harfbuzz font object from the face
-        font.setScale(fontSizePt * 4 / 3 * 1000, fontSizePt * 4 / 3 * 1000);
+        font.setScale(fontSizePt * 1000, fontSizePt * 1000);
         var buffer = hb.createBuffer(); // Make a buffer to hold some text
         buffer.addText(inputString); // Fill it with some stuff
         buffer.guessSegmentProperties(); // Set script, language and direction
@@ -401,21 +402,21 @@ function cons(h, t) {
 }
 /* PDF manipulation */
 async function drawText(pageIndex, fontFamily, textSize, color, x, y, text) {
-    let currentPage = pdfDoc.getPages()[0];
+    let pdfPages = pdfDoc.getPages();
+    let currentPage = pdfPages[pageIndex];
     const fcMatch = await (0, child_process_1.spawnSync)('fc-match', ['--format=%{file}', fontFamily]);
     const path = fcMatch.stdout.toString();
     pdfDoc.registerFontkit(fontkit_1.default);
     const fontBytes = fs.readFileSync(path);
     const customFont = await pdfDoc.embedFont(fontBytes);
     const rgbColor = await hexColorToRGB(color);
-    let a = await pdfDoc.getPage(0).drawText(text, {
+    let _ = await currentPage.drawText(text, {
         x: x,
         y: y,
         size: textSize,
         font: customFont,
         color: rgbColor,
     });
-    await pdfDoc.save();
 }
 async function hexColorToRGB(hex) {
     let rgbHex = /[#]?([\dA-Fa-f]{2})([\dA-Fa-f]{2})([\dA-Fa-f]{2})/.exec(hex);
@@ -825,7 +826,7 @@ async function interp(prog, env) {
                             throw new Error("the type of replace and variable should be the same.");
                         }
                         else {
-                            env[vari.id][0].value = prog[2];
+                            env[vari.id][0].value = replacer;
                             return { type: ItemType.Unit };
                         }
                     }
@@ -850,12 +851,32 @@ async function interp(prog, env) {
                         }
                         else {
                             const fontFamily = argsMapped[0].str;
-                            const textSize = argsMapped[1].int;
+                            const textSize = argsMapped[1].flo;
                             const color = argsMapped[2].str;
                             const x = argsMapped[3].flo;
                             const y = argsMapped[4].flo;
                             const text = argsMapped[5].str;
                             drawText(pdfDoc.getPageCount() - 1, fontFamily, textSize, color, x, y, text);
+                            return {
+                                type: ItemType.Unit,
+                            };
+                        }
+                    }
+                    // print to the console
+                    else if (op.id === "print") {
+                        if (prog.length !== 2) {
+                            throw invalidLengthException('print', 1);
+                        }
+                        else {
+                            let data = argsMapped[0];
+                            let dataString;
+                            if (data.hasOwnProperty("list")) {
+                                dataString = astToString(data, true);
+                            }
+                            else {
+                                dataString = astToString(data, false);
+                            }
+                            console.log(dataString);
                             return {
                                 type: ItemType.Unit,
                             };
