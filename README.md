@@ -1,6 +1,6 @@
 ## Just another interpretation of typesetting
 ## TODO
-**現在問題：需要遷移到PDFKit，以及使用標準的fontkit，避免ttc無法支援的問題。PDF-lib試過了，不能用。**
+**現在問題：需要遷移到PDFKit，以及使用標準的fontkit，避免ttc無法支援的問題。PDF-lib試過了，不能用。需要整理package-denendent**
  - [v] apply - 240403
  - [v] letrec - 240405
  - [v] car - 240403
