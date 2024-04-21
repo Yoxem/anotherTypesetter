@@ -24,7 +24,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs = __importStar(require("fs"));
 const pdf_lib_1 = require("pdf-lib");
-const fontkit_1 = __importDefault(require("@pdf-lib/fontkit"));
+const pdf_fontkit_1 = __importDefault(require("pdf-fontkit")); // for pdflib usage
+const memfs_1 = require("memfs");
 const typescript_parsec_1 = require("typescript-parsec");
 const typescript_parsec_2 = require("typescript-parsec");
 /** input lisp file */
@@ -171,7 +172,7 @@ async function measureWidthPx(inputString, fontFamily, fontSizePt) {
         var hb = require('harfbuzzjs/hbjs');
         hb = hb(wsm.instance);
         let fontName = (0, child_process_1.spawnSync)('fc-match', ['--format=%{file}', fontFamily]);
-        const fontPath = fontName.stdout.toString();
+        let fontPath = fontName.stdout.toString();
         let fontdata = fs.readFileSync(fontPath);
         var blob = hb.createBlob(fontdata); // Load the font data into something Harfbuzz can use
         var face = hb.createFace(blob, 0); // Select the first font in the file (there's normally only one!)
@@ -406,9 +407,25 @@ async function drawText(pageIndex, fontFamily, textSize, color, x, y, text) {
     let currentPage = pdfPages[pageIndex];
     const fcMatch = await (0, child_process_1.spawnSync)('fc-match', ['--format=%{file}', fontFamily]);
     const path = fcMatch.stdout.toString();
-    pdfDoc.registerFontkit(fontkit_1.default);
-    const fontBytes = fs.readFileSync(path);
-    const customFont = await pdfDoc.embedFont(fontBytes);
+    pdfDoc.registerFontkit(pdf_fontkit_1.default);
+    let fontBytes;
+    // workaround for ttc
+    if (path.match(/[.]ttc$/)) {
+        let tmpfs = (0, memfs_1.memfs)();
+        let psName = await (0, child_process_1.spawnSync)('fc-match', ['--format=%{postscriptname}',
+            fontFamily])
+            .stdout.toString();
+        console.log("===", psName);
+        let buffer = await fs.readFileSync("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc");
+        let coll = pdf_fontkit_1.default.create(buffer, "NotoSansCJKtc-Regular");
+        //let collection = await (<any>fontkitOrig.openSync(path, psName));
+        fontBytes = coll;
+        // fs.writeFileSync("/tmp/a.ttf", fontBytes);
+    }
+    else {
+        fontBytes = fs.readFileSync(path);
+    }
+    const customFont = await pdfDoc.embedFont(fontBytes.stream.buffer, { subset: true });
     const rgbColor = await hexColorToRGB(color);
     let _ = await currentPage.drawText(text, {
         x: x,

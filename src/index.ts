@@ -1,6 +1,8 @@
 import * as fs from 'fs';
-import { PDFDocument , RGB, rgb, StandardFonts} from 'pdf-lib';
-import fontkit from '@pdf-lib/fontkit';
+import { PDFDocument , RGB, rgb} from 'pdf-lib';
+import fontkit from 'pdf-fontkit'; // for pdflib usage
+import * as fontkitOrig from 'fontkit'; // for ttc converting to ttf
+import {memfs} from 'memfs';
 import { Token } from "typescript-parsec";
 import {
   buildLexer,
@@ -280,7 +282,10 @@ async function measureWidthPx(inputString: string, fontFamily : string, fontSize
       hb = hb(wsm.instance);
 
       let fontName =  spawnSync('fc-match', ['--format=%{file}', fontFamily]);
-      const fontPath = fontName.stdout.toString();
+      let fontPath = fontName.stdout.toString();
+      
+     
+
       let fontdata = fs.readFileSync(fontPath);
 
 
@@ -530,9 +535,27 @@ async function drawText(pageIndex : number,
 const fcMatch = await spawnSync('fc-match', ['--format=%{file}', fontFamily]);
 const path = fcMatch.stdout.toString();
  pdfDoc.registerFontkit(fontkit);
-   const fontBytes = fs.readFileSync(path);
+ let fontBytes;
+ // workaround for ttc
+ if (path.match(/[.]ttc$/)){
+  let tmpfs = memfs();
+  let psName =  await spawnSync('fc-match',
+                                ['--format=%{postscriptname}',
+                                fontFamily])
+                      .stdout.toString();
+  console.log("===", psName);
 
-  const customFont = await pdfDoc.embedFont(fontBytes);
+  let buffer = await fs.readFileSync("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc");
+  let coll = fontkit.create(buffer, "NotoSansCJKtc-Regular");
+  //let collection = await (<any>fontkitOrig.openSync(path, psName));
+  
+  fontBytes = coll;
+  // fs.writeFileSync("/tmp/a.ttf", fontBytes);
+}else{
+ fontBytes = fs.readFileSync(path);
+}
+
+  const customFont = await pdfDoc.embedFont((<any>fontBytes).stream.buffer, {subset:true});
 
   const rgbColor = await hexColorToRGB(color);
 
@@ -1103,6 +1126,7 @@ async function evaluate(expr: string): Promise<string> {
 import readline = require("node:readline");
 import { exit } from "node:process";
 import { spawnSync } from 'child_process';
+import { match } from 'assert';
 
 const rl = readline.createInterface({
   input: process.stdin,

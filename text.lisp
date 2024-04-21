@@ -1,6 +1,6 @@
 (begin
 (define defaultFontFormat
-    '(("fontFamily" "FreeSerif")
+    '(("fontFamily" "Noto Sans CJK TC")
       ("color" "#ff0000")
       ("fontSize" 12.0)        
     )
@@ -89,7 +89,7 @@
 //)
 (define x 0.0)
 
-(define text '("abracabra" ("fontSize" 18.0 "cat") "foo"))
+(define text '("abracabra" ("fontSize" 18.0 "貓") "foo"))
 
 (define putOnChar (lambda (boxDict x)
 (let
